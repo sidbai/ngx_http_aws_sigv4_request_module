@@ -1,0 +1,23 @@
+ngx_addon_name=ngx_http_aws_sigv4_request_module
+ngx_feature_name=
+ngx_feature_run=no
+ngx_feature_incs=
+ngx_feature_path="$ngx_addon_dir"
+ngx_feature_deps="$ngx_addon_dir/ngx_http_aws_sigv4_request_module.h"
+ngx_http_aws_sigv4_request_src="$ngx_addon_dir/ngx_http_aws_sigv4_request_module.c"
+ngx_feature_test="int a;"
+. auto/feature
+
+if [ $ngx_found = yes ]; then
+    have=NGX_HTTP_AWS_SIGV4_REQUEST . auto/have
+    CORE_INCS="$CORE_INCS $ngx_feature_path"
+    ngx_addon_name=ngx_http_aws_sigv4_request_module
+    HTTP_MODULES="$HTTP_MODULES ngx_http_aws_sigv4_request_module"
+    NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_feature_deps"
+    NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_http_aws_sigv4_request_src"
+else
+    cat << END
+    $0: error: the ngx_http_aws_sigv4_request_src addon error.
+END
+    exit 1
+fi
