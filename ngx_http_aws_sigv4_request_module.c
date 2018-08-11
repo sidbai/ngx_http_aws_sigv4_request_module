@@ -1,6 +1,27 @@
-#include "ngx_http_aws_sigv4_request_module.h"
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+typedef struct {
+    ngx_flag_t  aws_sigv4_enabled;
+    ngx_str_t   access_key_path;
+    ngx_str_t   access_key_id;
+    ngx_str_t   secret_access_key;
+    ngx_str_t   aws_region;
+    ngx_str_t   aws_service_name;
+    ngx_str_t   aws_service_endpoint;
+    ngx_str_t   internal_uri;
+} ngx_http_aws_sigv4_request_conf_t;
 
 static void *ngx_http_aws_sigv4_request_create_loc_conf(ngx_conf_t *cf);
+
+static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
+                                              ngx_command_t *cmd,
+                                              void *conf);
+
+static char *ngx_http_aws_service_set(ngx_conf_t *cf,
+                                      ngx_command_t *cmd,
+                                      void *conf);
 
 static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
                                             ngx_command_t *cmd,
@@ -12,8 +33,22 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r);
 
 static ngx_command_t  ngx_http_aws_sigv4_request_commands[] = {
 
-    { ngx_string("aws_sigv4"),
-      NGX_HTTP_LOC_CONF|NGX_CONF_TAKE4,
+    { ngx_string("aws_access_key_path"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_http_aws_access_key_path_set,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
+      NULL },
+
+    { ngx_string("aws_service"),
+      NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE3,
+      ngx_http_aws_service_set,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
+      NULL },
+
+    { ngx_string("aws_sigv4_request"),
+      NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_http_aws_sigv4_request_set,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
@@ -61,61 +96,19 @@ static void *ngx_http_aws_sigv4_request_create_loc_conf(ngx_conf_t *cf)
     return lcf;
 }
 
-static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
-                                            ngx_command_t *cmd,
-                                            void *conf)
+static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
+                                              ngx_command_t *cmd,
+                                              void *conf)
 {
-    ngx_str_t                         *cmd_args;
-    ngx_http_aws_sigv4_request_conf_t *lcf;
-
+    ngx_http_aws_sigv4_request_conf_t *lcf = conf;
+    ngx_str_t *cmd_args;
     cmd_args = cf->args->elts;
-    lcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_aws_sigv4_request_module);
-    if (lcf == NULL)
+    if (lcf->access_key_path.data != NULL)
     {
-        return NGX_CONF_ERROR;
+        return "is duplicate";
     }
-    lcf->aws_sigv4_enabled = 1;
-    ngx_uint_t  i;
-    ngx_flag_t has_region = 0, has_service = 0, has_endpoint = 0, has_path = 0;
-    for (i = 1; i < cf->args->nelts; i++)
-    {
-        if (ngx_strncmp(cmd_args[i].data, "region=", 7) == 0)
-        {
-            has_region = 1;
-            lcf->aws_region.data  = cmd_args[i].data + 7;
-            lcf->aws_region.len   = cmd_args[i].len - 7;
-        }
-        else if (ngx_strncmp(cmd_args[i].data, "service=", 8) == 0)
-        {
-            has_service = 1;
-            lcf->aws_service_name.data  = cmd_args[i].data + 8;
-            lcf->aws_service_name.len   = cmd_args[i].len - 8;
-        }
-        else if (ngx_strncmp(cmd_args[i].data, "endpoint=", 9) == 0)
-        {
-            has_endpoint = 1;
-            lcf->aws_service_endpoint.data  = cmd_args[i].data + 9;
-            lcf->aws_service_endpoint.len   = cmd_args[i].len - 9;
-        }
-        else if (ngx_strncmp(cmd_args[i].data, "access_key_path=", 16) == 0)
-        {
-            has_path = 1;
-            lcf->access_key_path.data = cmd_args[i].data + 16;
-            lcf->access_key_path.len  = cmd_args[i].len - 16;
-        }
-        else
-        {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                               "unsupported argument: %V", &cmd_args[i]);
-            return NGX_CONF_ERROR;
-        }
-    }
-    if (!has_region || !has_service || !has_endpoint || !has_path)
-    {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "missing arguments for aws_sigv4 directive");
-        return NGX_CONF_ERROR;
-    }
+    lcf->access_key_path  = cmd_args[1];
+
     char* ret = NGX_CONF_OK;
     /* load aws access key from file */
     if (!lcf->access_key_path.len || !lcf->access_key_path.data)
@@ -183,6 +176,80 @@ cleanup:
                            &(key_file.name));
     }
     return ret;
+}
+
+static char *ngx_http_aws_service_set(ngx_conf_t *cf,
+                                      ngx_command_t *cmd,
+                                      void *conf)
+{
+    ngx_http_aws_sigv4_request_conf_t *lcf = conf;
+    ngx_str_t *cmd_args;
+    cmd_args = cf->args->elts;
+    ngx_uint_t  i;
+    ngx_flag_t has_region = 0, has_name = 0, has_endpoint = 0;
+    for (i = 1; i < cf->args->nelts; i++)
+    {
+        if (ngx_strncmp(cmd_args[i].data, "region=", 7) == 0)
+        {
+            has_region = 1;
+            lcf->aws_region.data  = cmd_args[i].data + 7;
+            lcf->aws_region.len   = cmd_args[i].len - 7;
+        }
+        else if (ngx_strncmp(cmd_args[i].data, "name=", 5) == 0)
+        {
+            has_name = 1;
+            lcf->aws_service_name.data  = cmd_args[i].data + 5;
+            lcf->aws_service_name.len   = cmd_args[i].len - 5;
+        }
+        else if (ngx_strncmp(cmd_args[i].data, "endpoint=", 9) == 0)
+        {
+            has_endpoint = 1;
+            lcf->aws_service_endpoint.data  = cmd_args[i].data + 9;
+            lcf->aws_service_endpoint.len   = cmd_args[i].len - 9;
+        }
+        else
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "unsupported argument: %V", &cmd_args[i]);
+            return NGX_CONF_ERROR;
+        }
+    }
+    if (!has_region || !has_name || !has_endpoint)
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "missing arguments for aws_sigv4 directive");
+        return NGX_CONF_ERROR;
+    }
+    return NGX_CONF_OK;
+}
+
+static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
+                                            ngx_command_t *cmd,
+                                            void *conf)
+{
+    ngx_http_aws_sigv4_request_conf_t *lcf = conf;
+    ngx_str_t *cmd_args;
+    cmd_args = cf->args->elts;
+    if (lcf->internal_uri.data != NULL)
+    {
+        return "is duplicate";
+    }
+    /* aws_access_key_path and aws_service need to be set first */
+    if (lcf->access_key_id.data == NULL || lcf->aws_region.data == NULL)
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "missing aws access key and service configuration");
+        return NGX_CONF_ERROR;
+    }
+    if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0) {
+        lcf->internal_uri.len = 0;
+        lcf->internal_uri.data = (u_char *) "";
+        return NGX_CONF_OK;
+    }
+
+    lcf->internal_uri = cmd_args[1];
+    lcf->aws_sigv4_enabled = 1;
+    return NGX_CONF_OK;
 }
 
 static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf)

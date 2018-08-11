@@ -3,7 +3,7 @@ ngx_feature_name=
 ngx_feature_run=no
 ngx_feature_incs=
 ngx_feature_path="$ngx_addon_dir"
-ngx_feature_deps="$ngx_addon_dir/ngx_http_aws_sigv4_request_module.h"
+ngx_feature_deps=""
 ngx_http_aws_sigv4_request_src="$ngx_addon_dir/ngx_http_aws_sigv4_request_module.c"
 ngx_feature_test="int a;"
 . auto/feature
