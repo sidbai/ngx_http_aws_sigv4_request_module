@@ -6,6 +6,8 @@
 #include <ngx_http.h>
 
 typedef struct {
+    ngx_flag_t  aws_sigv4_enabled;
+    ngx_str_t   access_key_path;
     ngx_str_t   access_key_id;
     ngx_str_t   secret_access_key;
     ngx_str_t   aws_region;
