@@ -13,7 +13,20 @@ typedef struct {
     ngx_str_t   internal_uri;
 } ngx_http_aws_sigv4_request_conf_t;
 
-static void *ngx_http_aws_sigv4_request_create_loc_conf(ngx_conf_t *cf);
+typedef struct {
+    ngx_str_t   sigv4_host;
+    ngx_str_t   sigv4_uri;
+    ngx_str_t   sigv4_x_amz_date;
+    ngx_str_t   sigv4_authorization;
+} ngx_http_aws_sigv4_request_ctx_t;
+
+static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf);
+
+static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t *r,
+                                                             ngx_http_variable_value_t *v,
+                                                             uintptr_t data);
+
+static void *ngx_http_aws_sigv4_request_create_conf(ngx_conf_t *cf);
 
 static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
                                               ngx_command_t *cmd,
@@ -58,13 +71,13 @@ static ngx_command_t  ngx_http_aws_sigv4_request_commands[] = {
 };
 
 static ngx_http_module_t ngx_http_aws_sigv4_request_module_ctx = {
-    NULL,                                         /* preconfiguration */
+    ngx_http_aws_sigv4_request_add_variables,     /* preconfiguration */
     ngx_http_aws_sigv4_request_init,              /* postconfiguration */
     NULL,                                         /* create main configuration */
     NULL,                                         /* init main configuration */
     NULL,                                         /* create server configuration */
     NULL,                                         /* merge server configuration */
-    ngx_http_aws_sigv4_request_create_loc_conf,   /* create location configuration */
+    ngx_http_aws_sigv4_request_create_conf,       /* create location configuration */
     NULL                                          /* merge location configuration */
 };
 
@@ -83,7 +96,103 @@ ngx_module_t  ngx_http_aws_sigv4_request_module = {
     NGX_MODULE_V1_PADDING
 };
 
-static void *ngx_http_aws_sigv4_request_create_loc_conf(ngx_conf_t *cf)
+enum {
+    /* nginx variable for aws service endpoint */
+    ngx_http_aws_sigv4_var_host,
+    /* nginx variable for sigv4 request uri */
+    ngx_http_aws_sigv4_var_uri,
+    /* nginx variable for sigv4 request X-AMZ-DATE header value */
+    ngx_http_aws_sigv4_var_x_amz_date,
+    /* nginx variable for sigv4 request Authorization header value */
+    ngx_http_aws_sigv4_var_authorization
+} ngx_http_aws_sigv4_var_type_e;
+
+const ngx_http_variable_t ngx_http_aws_sigv4_request_vars[] = {
+    { ngx_string("aws_sigv4_host"), NULL,
+      ngx_http_aws_sigv4_request_variable_handler,
+      ngx_http_aws_sigv4_var_host, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+    { ngx_string("aws_sigv4_uri"), NULL,
+      ngx_http_aws_sigv4_request_variable_handler,
+      ngx_http_aws_sigv4_var_uri, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+    { ngx_string("aws_sigv4_x_amz_date"), NULL,
+      ngx_http_aws_sigv4_request_variable_handler,
+      ngx_http_aws_sigv4_var_x_amz_date, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+    { ngx_string("aws_sigv4_authorization"), NULL,
+      ngx_http_aws_sigv4_request_variable_handler,
+      ngx_http_aws_sigv4_var_authorization, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+    { ngx_null_string, NULL, NULL, 0, 0, 0 }
+};
+
+static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf)
+{
+    ngx_http_variable_t  *var, *v;
+    for (v = (ngx_http_variable_t *) ngx_http_aws_sigv4_request_vars; v->name.len; v++)
+    {
+        var = ngx_http_add_variable(cf, &v->name, v->flags);
+        if (var == NULL)
+        {
+            return NGX_ERROR;
+        }
+        var->get_handler = v->get_handler;
+        var->data = v->data;
+    }
+    return NGX_OK;
+}
+
+static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t *r,
+                                                             ngx_http_variable_value_t *v,
+                                                             uintptr_t data)
+{
+    /* get the module context from the main request because the var will be used by subrequest*/
+    ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r->main,
+                                                                    ngx_http_aws_sigv4_request_module);
+    if (ctx == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "aws sigv4 request module is NULL");
+        return NGX_ERROR;
+    }
+
+    ngx_str_t *var = NULL;
+    switch (data)
+    {
+        case ngx_http_aws_sigv4_var_host:
+            var = &ctx->sigv4_host;
+            break;
+        case ngx_http_aws_sigv4_var_uri:
+            var = &ctx->sigv4_uri;
+            break;
+        case ngx_http_aws_sigv4_var_x_amz_date:
+            var = &ctx->sigv4_x_amz_date;
+            break;
+        case ngx_http_aws_sigv4_var_authorization:
+            var = &ctx->sigv4_authorization;
+            break;
+        default:
+            ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
+                          "aws sigv4 request variable %d is not recognized", data);
+    }
+
+    if (var != NULL && var->data != NULL)
+    {
+        v->data         = var->data;
+        v->len          = var->len;
+        v->valid        = 1;
+        v->no_cacheable = 0;
+        v->not_found    = 0;
+    }
+    else
+    {
+        v->data         = NULL;
+        v->len          = 0;
+        v->valid        = 0;
+        v->no_cacheable = 1;
+        v->not_found    = 1;
+    }
+    return NGX_OK;
+}
+
+static void *ngx_http_aws_sigv4_request_create_conf(ngx_conf_t *cf)
 {
     ngx_http_aws_sigv4_request_conf_t *lcf;
     lcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_aws_sigv4_request_conf_t));
@@ -271,7 +380,6 @@ static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf)
     return NGX_OK;
 }
 
-
 static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
 {
     ngx_http_aws_sigv4_request_conf_t *lcf;
@@ -285,6 +393,18 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
         ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
                       "aws sigv4 request is not enabled for this location");
         return NGX_DECLINED;
+    }
+    ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_aws_sigv4_request_module);
+    if (ctx == NULL)
+    {
+        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_aws_sigv4_request_ctx_t));
+        if (ctx == NULL)
+        {
+            ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
+                          "failed to allocate memory for sigv4 request context");
+            return NGX_ERROR;
+        }
+        ngx_http_set_ctx(r, ctx, ngx_http_aws_sigv4_request_module);
     }
     return NGX_DECLINED;
 }
