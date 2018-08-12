@@ -11,13 +11,13 @@ typedef struct {
     ngx_str_t   aws_region;
     ngx_str_t   aws_service_name;
     ngx_str_t   aws_service_endpoint;
-    ngx_str_t   internal_uri;
 } ngx_http_aws_sigv4_request_conf_t;
 
 typedef struct {
     ngx_str_t   sigv4_host;
     ngx_str_t   sigv4_uri;
     ngx_str_t   sigv4_x_amz_date;
+    ngx_str_t   sigv4_x_amz_content_sha256;
     ngx_str_t   sigv4_authorization;
 } ngx_http_aws_sigv4_request_ctx_t;
 
@@ -62,7 +62,7 @@ static ngx_command_t  ngx_http_aws_sigv4_request_commands[] = {
       NULL },
 
     { ngx_string("aws_sigv4_request"),
-      NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
       ngx_http_aws_sigv4_request_set,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
@@ -102,8 +102,10 @@ enum {
     ngx_http_aws_sigv4_var_host,
     /* nginx variable for sigv4 request uri */
     ngx_http_aws_sigv4_var_uri,
-    /* nginx variable for sigv4 request X-AMZ-DATE header value */
+    /* nginx variable for sigv4 request X-Amz-Date header value */
     ngx_http_aws_sigv4_var_x_amz_date,
+    /* nginx variable for sigv4 request x-amz-content-sha256 header value */
+    ngx_http_aws_sigv4_var_x_amz_content_sha256,
     /* nginx variable for sigv4 request Authorization header value */
     ngx_http_aws_sigv4_var_authorization
 } ngx_http_aws_sigv4_var_type_e;
@@ -121,6 +123,10 @@ const ngx_http_variable_t ngx_http_aws_sigv4_request_vars[] = {
     { ngx_string("aws_sigv4_x_amz_date"), NULL,
       ngx_http_aws_sigv4_request_variable_handler,
       ngx_http_aws_sigv4_var_x_amz_date, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
+    { ngx_string("aws_sigv4_x_amz_content_sha256"), NULL,
+      ngx_http_aws_sigv4_request_variable_handler,
+      ngx_http_aws_sigv4_var_x_amz_content_sha256, NGX_HTTP_VAR_NOCACHEABLE, 0 },
 
     { ngx_string("aws_sigv4_authorization"), NULL,
       ngx_http_aws_sigv4_request_variable_handler,
@@ -149,9 +155,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t 
                                                              ngx_http_variable_value_t *v,
                                                              uintptr_t data)
 {
-    /* get the module context from the main request because the var will be used by subrequest*/
-    ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r->main,
-                                                                    ngx_http_aws_sigv4_request_module);
+    ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_aws_sigv4_request_module);
     if (ctx == NULL)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -170,6 +174,9 @@ static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t 
             break;
         case ngx_http_aws_sigv4_var_x_amz_date:
             var = &ctx->sigv4_x_amz_date;
+            break;
+        case ngx_http_aws_sigv4_var_x_amz_content_sha256:
+            var = &ctx->sigv4_x_amz_content_sha256;
             break;
         case ngx_http_aws_sigv4_var_authorization:
             var = &ctx->sigv4_authorization;
@@ -342,13 +349,9 @@ static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
                                             ngx_command_t *cmd,
                                             void *conf)
 {
-    ngx_http_aws_sigv4_request_conf_t *lcf = conf;
+    ngx_http_aws_sigv4_request_conf_t *lcf  = conf;
     ngx_str_t *cmd_args;
     cmd_args = cf->args->elts;
-    if (lcf->internal_uri.data != NULL)
-    {
-        return "is duplicate";
-    }
     /* aws_access_key_path and aws_service need to be set first */
     if (lcf->access_key_id.data == NULL || lcf->aws_region.data == NULL)
     {
@@ -356,14 +359,22 @@ static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
                            "missing aws access key and service configuration");
         return NGX_CONF_ERROR;
     }
-    if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0) {
-        lcf->internal_uri.len = 0;
-        lcf->internal_uri.data = (u_char *) "";
-        return NGX_CONF_OK;
+
+    if (ngx_strncmp(cmd_args[1].data, "on", 2) == 0 || cmd_args[1].len == 2)
+    {
+        lcf->aws_sigv4_enabled = 1;
+    }
+    else if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0 || cmd_args[1].len == 3)
+    {
+        lcf->aws_sigv4_enabled = 0;
+    }
+    else
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid argument: %V", &cmd_args[1]);
+        return NGX_CONF_ERROR;
     }
 
-    lcf->internal_uri = cmd_args[1];
-    lcf->aws_sigv4_enabled = 1;
     return NGX_CONF_OK;
 }
 
@@ -412,5 +423,13 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
         }
         ngx_http_set_ctx(r, ctx, ngx_http_aws_sigv4_request_module);
     }
+
+    ctx->sigv4_host                 = lcf->aws_service_endpoint;
+    ctx->sigv4_uri                  = (ngx_str_t) ngx_null_string;
+    ctx->sigv4_x_amz_date           = (ngx_str_t) ngx_null_string;
+    /* currently we only support unsigned payload option */
+    ctx->sigv4_x_amz_content_sha256 = (ngx_str_t) ngx_string("UNSIGNED-PAYLOAD");
+    ctx->sigv4_authorization        = (ngx_str_t) ngx_null_string;
+
     return NGX_DECLINED;
 }
