@@ -1,7 +1,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
-#include "aws_sigv4.h"
+#include "ngx_http_aws_sigv4_utils.h"
 
 typedef struct {
     ngx_flag_t  aws_sigv4_enabled;

@@ -4,8 +4,8 @@ ngx_feature_run=no
 ngx_feature_incs=
 ngx_feature_libs="-lssl -lcrypto"
 ngx_feature_path="$ngx_addon_dir"
-ngx_feature_deps="$ngx_addon_dir/aws_sigv4_common.h $ngx_addon_dir/aws_sigv4.h"
-ngx_http_aws_sigv4_request_src="$ngx_addon_dir/ngx_http_aws_sigv4_request_module.c $ngx_addon_dir/aws_sigv4_common.c $ngx_addon_dir/aws_sigv4.c"
+ngx_feature_deps="$ngx_addon_dir/ngx_http_aws_sigv4_utils.h"
+ngx_http_aws_sigv4_request_src="$ngx_addon_dir/ngx_http_aws_sigv4_request_module.c $ngx_addon_dir/ngx_http_aws_sigv4_utils.c"
 ngx_feature_test="int a;"
 . auto/feature
 
