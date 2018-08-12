@@ -1,6 +1,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include "aws_sigv4.h"
 
 typedef struct {
     ngx_flag_t  aws_sigv4_enabled;
@@ -108,18 +109,23 @@ enum {
 } ngx_http_aws_sigv4_var_type_e;
 
 const ngx_http_variable_t ngx_http_aws_sigv4_request_vars[] = {
+
     { ngx_string("aws_sigv4_host"), NULL,
       ngx_http_aws_sigv4_request_variable_handler,
       ngx_http_aws_sigv4_var_host, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
     { ngx_string("aws_sigv4_uri"), NULL,
       ngx_http_aws_sigv4_request_variable_handler,
       ngx_http_aws_sigv4_var_uri, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
     { ngx_string("aws_sigv4_x_amz_date"), NULL,
       ngx_http_aws_sigv4_request_variable_handler,
       ngx_http_aws_sigv4_var_x_amz_date, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
     { ngx_string("aws_sigv4_authorization"), NULL,
       ngx_http_aws_sigv4_request_variable_handler,
       ngx_http_aws_sigv4_var_authorization, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
 };
 
