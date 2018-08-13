@@ -28,7 +28,7 @@ static int aws_sigv4_strcmp(ngx_str_t* str1, ngx_str_t* str2)
 
 static inline void parse_query_components(ngx_str_t*  query_str,
                                           ngx_str_t*  query_component_arr,
-                                          size_t*           arr_len)
+                                          size_t*     arr_len)
 {
     if (aws_sigv4_empty_str(query_str)
         || query_component_arr == NULL)
@@ -110,7 +110,7 @@ static void get_signing_key(aws_sigv4_params_t* sigv4_params, ngx_str_t* signing
 }
 
 static void get_credential_scope(aws_sigv4_params_t* sigv4_params,
-                          ngx_str_t* credential_scope)
+                                 ngx_str_t* credential_scope)
 {
     unsigned char* str = credential_scope->data;
     /* get date in yyyymmdd format */
@@ -230,7 +230,8 @@ int aws_sigv4_sign(ngx_http_request_t* req,
         return AWS_SIGV4_INVALID_INPUT_ERROR;
     }
 
-    auth_header->value.data = ngx_pcalloc(req->pool, AWS_SIGV4_AUTH_HEADER_MAX_LEN * sizeof(unsigned char));
+    auth_header->value.data = ngx_pcalloc(req->pool,
+                                          AWS_SIGV4_AUTH_HEADER_MAX_LEN * sizeof(unsigned char));
     if (auth_header->value.data == NULL)
     {
         ngx_log_error(NGX_LOG_EMERG, req->connection->log, 0,
