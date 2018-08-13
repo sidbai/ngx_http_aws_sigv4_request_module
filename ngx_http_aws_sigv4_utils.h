@@ -2,6 +2,7 @@
 #define _NGX_HTTP_AWS_SIGV4_UTILS_H_INCLUDED_
 
 #include <ngx_core.h>
+#include <ngx_http.h>
 
 /* sigv4 util code is from https://github.com/sidbai/aws-sigv4-c */
 #define AWS_SIGV4_MEMORY_ALLOCATION_ERROR  -2
@@ -34,10 +35,13 @@ typedef struct aws_sigv4_params_s {
 
 /** @brief perform sigv4 signing
  *
+ * @param[in] req           A pointer to nginx http request struct
  * @param[in] sigv4_params  A pointer to a struct of sigv4 parameters
  * @param[out] auth_header  A struct to store Authorization header name and value
  * @return Status code where zero for success and non-zero for failure
  */
-int aws_sigv4_sign(aws_sigv4_params_t* sigv4_params, aws_sigv4_header_t* auth_header);
+int aws_sigv4_sign(ngx_http_request_t* req,
+                   aws_sigv4_params_t* sigv4_params,
+                   aws_sigv4_header_t* auth_header);
 
 #endif /* _NGX_HTTP_AWS_SIGV4_UTILS_H_INCLUDED_ */

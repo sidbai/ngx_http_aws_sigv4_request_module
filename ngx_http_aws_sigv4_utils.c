@@ -5,6 +5,7 @@
 
 #define AWS_SIGV4_AUTH_HEADER_NAME            "Authorization"
 #define AWS_SIGV4_SIGNING_ALGORITHM           "AWS4-HMAC-SHA256"
+#define AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION     "UNSIGNED-PAYLOAD"
 #define AWS_SIGV4_HEX_SHA256_LENGTH           SHA256_DIGEST_LENGTH * 2
 #define AWS_SIGV4_AUTH_HEADER_MAX_LEN         1024
 #define AWS_SIGV4_CANONICAL_REQUEST_BUF_LEN   1024
@@ -149,17 +150,21 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
                       &sigv4_params->method,
                       &sigv4_params->uri);
 
-    ngx_str_t query_components[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
-    size_t query_num = 0;
-    parse_query_components(&sigv4_params->query_str, query_components, &query_num);
-    qsort(query_components, query_num, sizeof(ngx_str_t),
-          (aws_sigv4_compar_func_t) aws_sigv4_strcmp);
-    for (size_t i = 0; i < query_num; i++)
+    /* query string can be empty */
+    if (!aws_sigv4_empty_str(&sigv4_params->query_str))
     {
-        str = ngx_sprintf(str, "%V", &query_components[i]);
-        if (i != query_num - 1)
+        ngx_str_t query_components[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
+        size_t query_num = 0;
+        parse_query_components(&sigv4_params->query_str, query_components, &query_num);
+        qsort(query_components, query_num, sizeof(ngx_str_t),
+              (aws_sigv4_compar_func_t) aws_sigv4_strcmp);
+        for (size_t i = 0; i < query_num; i++)
         {
-            *(str++) = '&';
+            str = ngx_sprintf(str, "%V", &query_components[i]);
+            if (i != query_num - 1)
+            {
+                *(str++) = '&';
+            }
         }
     }
     *(str++) = '\n';
@@ -174,9 +179,17 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
     str += signed_headers.len;
     *(str++) = '\n';
 
+    // disable payload signing for now
+    /*
     ngx_str_t hex_sha256 = { .data = str };
     get_hex_sha256(&sigv4_params->payload, &hex_sha256);
     str += hex_sha256.len;
+    */
+
+    /* TODO: make payload signing option flexible */
+    size_t option_len   = strlen(AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION);
+    strncpy((char*) str, AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION, option_len + 1);
+    str += option_len;
 
     canonical_request->len = str - canonical_request->data;
 }
@@ -197,31 +210,32 @@ static void get_string_to_sign(ngx_str_t* request_date,
     string_to_sign->len = str - string_to_sign->data;
 }
 
-int aws_sigv4_sign(aws_sigv4_params_t* sigv4_params, aws_sigv4_header_t* auth_header)
+int aws_sigv4_sign(ngx_http_request_t* req,
+                   aws_sigv4_params_t* sigv4_params,
+                   aws_sigv4_header_t* auth_header)
 {
-    int rc = AWS_SIGV4_OK;
     if (auth_header == NULL
         || sigv4_params == NULL
         || aws_sigv4_empty_str(&sigv4_params->secret_access_key)
         || aws_sigv4_empty_str(&sigv4_params->access_key_id)
         || aws_sigv4_empty_str(&sigv4_params->method)
         || aws_sigv4_empty_str(&sigv4_params->uri)
-        || aws_sigv4_empty_str(&sigv4_params->query_str)
         || aws_sigv4_empty_str(&sigv4_params->host)
         || aws_sigv4_empty_str(&sigv4_params->x_amz_date)
         || aws_sigv4_empty_str(&sigv4_params->region)
         || aws_sigv4_empty_str(&sigv4_params->service))
     {
-        rc = AWS_SIGV4_INVALID_INPUT_ERROR;
-        goto err;
+        ngx_log_error(NGX_LOG_EMERG, req->connection->log, 0,
+                      "invalid input for func: %s", __func__);
+        return AWS_SIGV4_INVALID_INPUT_ERROR;
     }
 
-    /* TODO: Support custom memory allocator */
-    auth_header->value.data = calloc(AWS_SIGV4_AUTH_HEADER_MAX_LEN, sizeof(unsigned char));
+    auth_header->value.data = ngx_pcalloc(req->pool, AWS_SIGV4_AUTH_HEADER_MAX_LEN * sizeof(unsigned char));
     if (auth_header->value.data == NULL)
     {
-        rc = AWS_SIGV4_MEMORY_ALLOCATION_ERROR;
-        goto err;
+        ngx_log_error(NGX_LOG_EMERG, req->connection->log, 0,
+                      "failed to allocate memory for authorization header value in request pool");
+        return AWS_SIGV4_MEMORY_ALLOCATION_ERROR;
     }
 
     auth_header->name.data  = (unsigned char*) AWS_SIGV4_AUTH_HEADER_NAME;
@@ -248,11 +262,15 @@ int aws_sigv4_sign(aws_sigv4_params_t* sigv4_params, aws_sigv4_header_t* auth_he
     unsigned char canonical_request_buf[AWS_SIGV4_CANONICAL_REQUEST_BUF_LEN]  = { 0 };
     ngx_str_t canonical_request = { .data = canonical_request_buf };
     get_canonical_request(sigv4_params, &canonical_request);
+    ngx_log_error(NGX_LOG_DEBUG, req->connection->log, 0,
+                  "canonical request: %V", &canonical_request);
     /* Task 2: Create a string to sign */
     unsigned char string_to_sign_buf[AWS_SIGV4_STRING_TO_SIGN_BUF_LEN]  = { 0 };
     ngx_str_t string_to_sign = { .data = string_to_sign_buf };
     get_string_to_sign(&sigv4_params->x_amz_date, &credential_scope,
                        &canonical_request, &string_to_sign);
+    ngx_log_error(NGX_LOG_DEBUG, req->connection->log, 0,
+                  "string to sign: %V", &string_to_sign);
     /* Task 3: Calculate the signature */
     /* 3.1: Derive signing key */
     unsigned char signing_key_buf[AWS_SIGV4_KEY_BUF_LEN] = { 0 };
@@ -270,13 +288,5 @@ int aws_sigv4_sign(aws_sigv4_params_t* sigv4_params, aws_sigv4_header_t* auth_he
     get_hexdigest(&signed_msg, &signature);
     str += signature.len;
     auth_header->value.len = str - auth_header->value.data;
-    return rc;
-err:
-    /* deallocate memory in case of failure */
-    if (auth_header && auth_header->value.data)
-    {
-        free(auth_header->value.data);
-        auth_header->value.data = NULL;
-    }
-    return rc;
+    return AWS_SIGV4_OK;
 }

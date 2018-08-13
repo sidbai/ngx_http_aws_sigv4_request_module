@@ -424,12 +424,39 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
         ngx_http_set_ctx(r, ctx, ngx_http_aws_sigv4_request_module);
     }
 
-    ctx->sigv4_host                 = lcf->aws_service_endpoint;
-    ctx->sigv4_uri                  = (ngx_str_t) ngx_null_string;
-    ctx->sigv4_x_amz_date           = (ngx_str_t) ngx_null_string;
+    ctx->sigv4_host = lcf->aws_service_endpoint;
+    ctx->sigv4_uri  = r->uri;
+
+    ctx->sigv4_x_amz_date.len   = strlen("20170101T150101Z");
+    ctx->sigv4_x_amz_date.data  = ngx_pcalloc(r->pool, ctx->sigv4_x_amz_date.len + 1);
+    time_t t = time(NULL);
+    strftime((char*) ctx->sigv4_x_amz_date.data, ctx->sigv4_x_amz_date.len + 1,
+             "%Y%m%dT%H%M%SZ", gmtime(&t));
+
     /* currently we only support unsigned payload option */
     ctx->sigv4_x_amz_content_sha256 = (ngx_str_t) ngx_string("UNSIGNED-PAYLOAD");
-    ctx->sigv4_authorization        = (ngx_str_t) ngx_null_string;
+
+    aws_sigv4_params_t sigv4_params = { 0 };
+    sigv4_params.secret_access_key  = lcf->secret_access_key;
+    sigv4_params.access_key_id      = lcf->access_key_id;
+    sigv4_params.method             = r->method_name;
+    sigv4_params.uri                = r->uri;
+    sigv4_params.query_str          = r->args;
+    sigv4_params.host               = lcf->aws_service_endpoint;
+    sigv4_params.x_amz_date         = ctx->sigv4_x_amz_date;
+    sigv4_params.service            = lcf->aws_service_name;
+    sigv4_params.region             = lcf->aws_region;
+
+    aws_sigv4_header_t auth_header;
+    int rc = aws_sigv4_sign(r, &sigv4_params, &auth_header);
+    if (rc != AWS_SIGV4_OK)
+    {
+        ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
+                      "failed to perform sigv4 signing with return code: %d", rc);
+        return NGX_ERROR;
+    }
+
+    ctx->sigv4_authorization  = auth_header.value;
 
     return NGX_DECLINED;
 }
