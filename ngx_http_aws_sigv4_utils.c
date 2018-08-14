@@ -10,7 +10,7 @@
 #define AWS_SIGV4_AUTH_HEADER_MAX_LEN         1024
 #define AWS_SIGV4_CANONICAL_REQUEST_BUF_LEN   1024
 #define AWS_SIGV4_STRING_TO_SIGN_BUF_LEN      1024
-#define AWS_SIGV4_KEY_BUF_LEN                 256
+#define AWS_SIGV4_KEY_BUF_LEN                 33
 #define AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS    50
 
 typedef int (*aws_sigv4_compar_func_t)(const void*, const void*);
@@ -273,16 +273,29 @@ int aws_sigv4_sign(ngx_http_request_t* req,
     ngx_log_error(NGX_LOG_DEBUG, req->connection->log, 0,
                   "string to sign: %V", &string_to_sign);
     /* Task 3: Calculate the signature */
-    /* 3.1: Derive signing key */
-    unsigned char signing_key_buf[AWS_SIGV4_KEY_BUF_LEN] = { 0 };
-    ngx_str_t signing_key = { .data = signing_key_buf };
-    get_signing_key(sigv4_params, &signing_key);
+    /* 3.1: Derive signing key if cached signing is invalid */
+    if (sigv4_params->cached_signing_key == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0,
+                      "null cached signing key ptr");
+        return AWS_SIGV4_INVALID_INPUT_ERROR;
+    }
+    /* cached signing key is no longer valid */
+    if (sigv4_params->cached_signing_key->len == 0
+        || ngx_strncmp(sigv4_params->cached_date_yyyymmdd->data,
+                       sigv4_params->x_amz_date.data, 8) != 0)
+    {
+        get_signing_key(sigv4_params, sigv4_params->cached_signing_key);
+        strncpy((char*) sigv4_params->cached_date_yyyymmdd->data,
+                (char*) sigv4_params->x_amz_date.data, 9);
+        sigv4_params->cached_date_yyyymmdd->len = 8;
+    }
     /* 3.2: Calculate signature on the string to sign */
     unsigned char signed_msg_buf[HMAC_MAX_MD_CBLOCK] = { 0 };
     ngx_str_t signed_msg = { .data = signed_msg_buf };
     /* get HMAC SHA256 */
     HMAC(EVP_sha256(),
-         signing_key.data, signing_key.len,
+         sigv4_params->cached_signing_key->data, sigv4_params->cached_signing_key->len,
          string_to_sign.data, string_to_sign.len,
          signed_msg.data, (unsigned int*) &signed_msg.len);
     ngx_str_t signature = { .data = str };

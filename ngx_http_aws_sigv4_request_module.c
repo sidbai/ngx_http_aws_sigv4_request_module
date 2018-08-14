@@ -11,6 +11,8 @@ typedef struct {
     ngx_str_t   aws_region;
     ngx_str_t   aws_service_name;
     ngx_str_t   aws_service_endpoint;
+    ngx_str_t   cached_signing_key;
+    ngx_str_t   cached_date_yyyymmdd;
 } ngx_http_aws_sigv4_request_conf_t;
 
 typedef struct {
@@ -374,6 +376,9 @@ static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
                            "invalid argument: %V", &cmd_args[1]);
         return NGX_CONF_ERROR;
     }
+    lcf->cached_signing_key.data    = ngx_pcalloc(cf->pool, 33);
+    lcf->cached_signing_key.len     = 0;
+    lcf->cached_date_yyyymmdd.data  = ngx_pcalloc(cf->pool, 9);
 
     return NGX_CONF_OK;
 }
@@ -436,16 +441,18 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
     /* currently we only support unsigned payload option */
     ctx->sigv4_x_amz_content_sha256 = (ngx_str_t) ngx_string("UNSIGNED-PAYLOAD");
 
-    aws_sigv4_params_t sigv4_params = { 0 };
-    sigv4_params.secret_access_key  = lcf->secret_access_key;
-    sigv4_params.access_key_id      = lcf->access_key_id;
-    sigv4_params.method             = r->method_name;
-    sigv4_params.uri                = r->uri;
-    sigv4_params.query_str          = r->args;
-    sigv4_params.host               = lcf->aws_service_endpoint;
-    sigv4_params.x_amz_date         = ctx->sigv4_x_amz_date;
-    sigv4_params.service            = lcf->aws_service_name;
-    sigv4_params.region             = lcf->aws_region;
+    aws_sigv4_params_t sigv4_params     = { 0 };
+    sigv4_params.secret_access_key      = lcf->secret_access_key;
+    sigv4_params.access_key_id          = lcf->access_key_id;
+    sigv4_params.method                 = r->method_name;
+    sigv4_params.uri                    = r->uri;
+    sigv4_params.query_str              = r->args;
+    sigv4_params.host                   = lcf->aws_service_endpoint;
+    sigv4_params.x_amz_date             = ctx->sigv4_x_amz_date;
+    sigv4_params.service                = lcf->aws_service_name;
+    sigv4_params.region                 = lcf->aws_region;
+    sigv4_params.cached_signing_key     = &lcf->cached_signing_key;
+    sigv4_params.cached_date_yyyymmdd   = &lcf->cached_date_yyyymmdd;
 
     aws_sigv4_header_t auth_header;
     int rc = aws_sigv4_sign(r, &sigv4_params, &auth_header);
@@ -455,7 +462,6 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
                       "failed to perform sigv4 signing with return code: %d", rc);
         return NGX_ERROR;
     }
-
     ctx->sigv4_authorization  = auth_header.value;
 
     return NGX_DECLINED;

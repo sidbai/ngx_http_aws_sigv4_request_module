@@ -16,21 +16,25 @@ typedef struct aws_sigv4_header_s {
 
 typedef struct aws_sigv4_params_s {
     /* AWS credential parameters */
-    ngx_str_t secret_access_key;
-    ngx_str_t access_key_id;
+    ngx_str_t   secret_access_key;
+    ngx_str_t   access_key_id;
 
     /* HTTP request parameters */
-    ngx_str_t method;
-    ngx_str_t uri;
-    ngx_str_t query_str;
-    ngx_str_t host;
+    ngx_str_t   method;
+    ngx_str_t   uri;
+    ngx_str_t   query_str;
+    ngx_str_t   host;
     /* x-amz-date header value in ISO8601 format */
-    ngx_str_t x_amz_date;
-    ngx_str_t payload;
+    ngx_str_t   x_amz_date;
+    ngx_str_t   payload;
 
     /* AWS service parameters */
-    ngx_str_t service;
-    ngx_str_t region;
+    ngx_str_t   service;
+    ngx_str_t   region;
+
+    /* cached values for perf improvement */
+    ngx_str_t  *cached_signing_key;
+    ngx_str_t  *cached_date_yyyymmdd;
 } aws_sigv4_params_t;
 
 /** @brief perform sigv4 signing
