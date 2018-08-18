@@ -273,7 +273,7 @@ int aws_sigv4_sign(ngx_http_request_t* req,
     ngx_log_error(NGX_LOG_DEBUG, req->connection->log, 0,
                   "string to sign: %V", &string_to_sign);
     /* Task 3: Calculate the signature */
-    /* 3.1: Derive signing key if cached signing is invalid */
+    /* 3.1: Derive signing key if cached signing key is invalid */
     if (sigv4_params->cached_signing_key == NULL)
     {
         ngx_log_error(NGX_LOG_ERR, req->connection->log, 0,
@@ -289,6 +289,11 @@ int aws_sigv4_sign(ngx_http_request_t* req,
         strncpy((char*) sigv4_params->cached_date_yyyymmdd->data,
                 (char*) sigv4_params->x_amz_date.data, 9);
         sigv4_params->cached_date_yyyymmdd->len = 8;
+    }
+    else
+    {
+        ngx_log_error(NGX_LOG_DEBUG, req->connection->log, 0,
+                      "using cached signing key");
     }
     /* 3.2: Calculate signature on the string to sign */
     unsigned char signed_msg_buf[HMAC_MAX_MD_CBLOCK] = { 0 };
