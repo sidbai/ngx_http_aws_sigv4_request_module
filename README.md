@@ -25,11 +25,7 @@ http
             aws_access_key_path /path/to/aws_access_key_file;
             aws_sigv4_request on;
 
-            proxy_set_header Host $aws_sigv4_host;
-            proxy_set_header x-amz-date $aws_sigv4_x_amz_date;
-            proxy_set_header Authorization $aws_sigv4_authorization;
-            proxy_set_header x-amz-content-sha256 $aws_sigv4_x_amz_content_sha256;
-            proxy_pass https://$aws_sigv4_host$aws_sigv4_uri;
+            proxy_pass https://$aws_sigv4_host;
             proxy_ssl_name $aws_sigv4_host;
         }
     }
