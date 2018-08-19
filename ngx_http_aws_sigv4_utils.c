@@ -27,9 +27,80 @@ static int aws_sigv4_query_param_cmp(aws_sigv4_query_param_t* p1,
     return strncmp((char*) p1->name.data, (char*) p2->name.data, len);
 }
 
-static inline void parse_query_params(ngx_str_t*                query_str,
-                                      aws_sigv4_query_param_t*  query_params,
-                                      size_t*                   arr_len)
+/*
+ * TODO: This is a very basic percent encoding. May want to extend in future.
+ */
+static unsigned char* percent_encode(unsigned char* dst_cstr, ngx_str_t* src_str)
+{
+    unsigned char* src_cstr = src_str->data;
+    while (src_cstr != src_str->data + src_str->len)
+    {
+        unsigned char c = *src_cstr;
+        if ((c >= '0' && c <= '9')
+            || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+            || (c == '-' || c == '_' || c == '.' || c == '~'))
+        {
+            *(dst_cstr++) = c;
+        }
+        else if (c == '\b')
+        {
+            strncpy((char *) dst_cstr, "%08", 3);
+            dst_cstr += 3;
+        }
+        else if (c == '\t')
+        {
+            strncpy((char *) dst_cstr, "%09", 3);
+            dst_cstr += 3;
+        }
+        else if (c == '\n')
+        {
+            strncpy((char *) dst_cstr, "%0A", 3);
+            dst_cstr += 3;
+        }
+        else if (c == '\r')
+        {
+            strncpy((char *) dst_cstr, "%0D", 3);
+            dst_cstr += 3;
+        }
+        else if (c == ' ')
+        {
+            strncpy((char *) dst_cstr, "%20", 3);
+            dst_cstr += 3;
+        }
+        else if (c == '!')
+        {
+            strncpy((char *) dst_cstr, "%21", 3);
+            dst_cstr += 3;
+        }
+        else
+        {
+            *(dst_cstr++) = c;
+        }
+        src_cstr++;
+    }
+    return dst_cstr;
+}
+
+static unsigned char* query_params_encode(unsigned char*            dst_cstr,
+                                          aws_sigv4_query_param_t*  query_params,
+                                          size_t                    query_num)
+{
+    for (size_t i = 0; i < query_num; i++)
+    {
+        dst_cstr = percent_encode(dst_cstr, &query_params[i].name);
+        *(dst_cstr++) = '=';
+        dst_cstr = percent_encode(dst_cstr, &query_params[i].value);
+        if (i != query_num - 1)
+        {
+            *(dst_cstr++) = '&';
+        }
+    }
+    return dst_cstr;
+}
+
+static void parse_query_params(ngx_str_t*                query_str,
+                               aws_sigv4_query_param_t*  query_params,
+                               size_t*                   arr_len)
 {
     if (aws_sigv4_empty_str(query_str)
         || query_params == NULL)
@@ -150,12 +221,9 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
                                   ngx_str_t* canonical_request)
 {
     unsigned char* str = canonical_request->data;
-    /* TODO: Here we assume the URI and query string have already been encoded.
-     *       Add encoding logic in future.
-     */
-    str = ngx_sprintf(str, "%V\n%V\n",
-                      &sigv4_params->method,
-                      &sigv4_params->uri);
+    str = ngx_sprintf(str, "%V\n", &sigv4_params->method);
+    str = percent_encode(str, &sigv4_params->uri);
+    *(str++) = '\n';
 
     /* query string can be empty */
     if (!aws_sigv4_empty_str(&sigv4_params->query_str))
@@ -165,14 +233,7 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
         parse_query_params(&sigv4_params->query_str, query_params, &query_num);
         qsort(query_params, query_num, sizeof(aws_sigv4_query_param_t),
               (aws_sigv4_compar_func_t) aws_sigv4_query_param_cmp);
-        for (size_t i = 0; i < query_num; i++)
-        {
-            str = ngx_sprintf(str, "%V=%V", &query_params[i].name, &query_params[i].value);
-            if (i != query_num - 1)
-            {
-                *(str++) = '&';
-            }
-        }
+        str = query_params_encode(str, query_params, query_num);
     }
     *(str++) = '\n';
 
