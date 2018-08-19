@@ -20,38 +20,45 @@ static inline int aws_sigv4_empty_str(ngx_str_t* str)
     return (str == NULL || str->data == NULL || str->len == 0) ? 1 : 0;
 }
 
-static int aws_sigv4_strcmp(ngx_str_t* str1, ngx_str_t* str2)
+static int aws_sigv4_query_param_cmp(aws_sigv4_query_param_t* p1,
+                                     aws_sigv4_query_param_t* p2)
 {
-    size_t len = str1->len <= str2->len ? str1->len : str2->len;
-    return strncmp((char*) str1->data, (char*) str2->data, len);
+    size_t len = p1->name.len <= p2->name.len ? p1->name.len : p2->name.len;
+    return strncmp((char*) p1->name.data, (char*) p2->name.data, len);
 }
 
-static inline void parse_query_components(ngx_str_t*  query_str,
-                                          ngx_str_t*  query_component_arr,
-                                          size_t*     arr_len)
+static inline void parse_query_params(ngx_str_t*                query_str,
+                                      aws_sigv4_query_param_t*  query_params,
+                                      size_t*                   arr_len)
 {
     if (aws_sigv4_empty_str(query_str)
-        || query_component_arr == NULL)
+        || query_params == NULL)
     {
         arr_len = 0;
         return;
     }
     size_t idx = 0;
     unsigned char* c_ptr = query_str->data;
-    query_component_arr[0].data = c_ptr;
+    query_params[0].name.data = c_ptr;
+    /* here we assume query string are well-formed */
     while (c_ptr != query_str->data + query_str->len)
     {
-        if (*c_ptr == '&')
+        if (*c_ptr == '=')
         {
-            query_component_arr[idx].len = c_ptr - query_component_arr[idx].data;
-            query_component_arr[++idx].data = ++c_ptr;
+            query_params[idx].name.len    = c_ptr - query_params[idx].name.data;
+            query_params[idx].value.data  = ++c_ptr;
+        }
+        else if (*c_ptr == '&')
+        {
+            query_params[idx].value.len   = c_ptr - query_params[idx].value.data;
+            query_params[++idx].name.data = ++c_ptr;
         }
         else
         {
             c_ptr++;
         }
     }
-    query_component_arr[idx].len = c_ptr - query_component_arr[idx].data;
+    query_params[idx].value.len = c_ptr - query_params[idx].value.data;
     *arr_len = idx + 1;
 }
 
@@ -153,14 +160,14 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
     /* query string can be empty */
     if (!aws_sigv4_empty_str(&sigv4_params->query_str))
     {
-        ngx_str_t query_components[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
+        aws_sigv4_query_param_t query_params[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
         size_t query_num = 0;
-        parse_query_components(&sigv4_params->query_str, query_components, &query_num);
-        qsort(query_components, query_num, sizeof(ngx_str_t),
-              (aws_sigv4_compar_func_t) aws_sigv4_strcmp);
+        parse_query_params(&sigv4_params->query_str, query_params, &query_num);
+        qsort(query_params, query_num, sizeof(aws_sigv4_query_param_t),
+              (aws_sigv4_compar_func_t) aws_sigv4_query_param_cmp);
         for (size_t i = 0; i < query_num; i++)
         {
-            str = ngx_sprintf(str, "%V", &query_components[i]);
+            str = ngx_sprintf(str, "%V=%V", &query_params[i].name, &query_params[i].value);
             if (i != query_num - 1)
             {
                 *(str++) = '&';

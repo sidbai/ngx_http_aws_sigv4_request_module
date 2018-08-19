@@ -14,6 +14,11 @@ typedef struct aws_sigv4_header_s {
     ngx_str_t value;
 } aws_sigv4_header_t;
 
+typedef struct aws_sigv4_query_param_s {
+    ngx_str_t name;
+    ngx_str_t value;
+} aws_sigv4_query_param_t;
+
 typedef struct aws_sigv4_params_s {
     /* AWS credential parameters */
     ngx_str_t   secret_access_key;
