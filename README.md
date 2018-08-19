@@ -31,3 +31,25 @@ http
     }
 }
 ```
+
+You can also configure to rewrite uri to internal location if you don't want to expose s3 bucket information.
+```
+http
+    server {
+        listen       80;
+
+        rewrite ^/my_files/(.*)$ /some_test_s3_bucket/$1 last;
+
+        location /some_test_s3_bucket/ {
+            internal;
+            resolver 8.8.8.8;
+            aws_service region=us-east-1 name=s3 endpoint=s3.amazonaws.com;
+            aws_access_key_path /path/to/aws_access_key_file;
+            aws_sigv4_request on;
+
+            proxy_pass https://$aws_sigv4_host;
+            proxy_ssl_name $aws_sigv4_host;
+        }
+    }
+}
+```

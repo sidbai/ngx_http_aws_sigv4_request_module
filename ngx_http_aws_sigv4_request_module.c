@@ -416,15 +416,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
     sigv4_params.secret_access_key      = lcf->secret_access_key;
     sigv4_params.access_key_id          = lcf->access_key_id;
     sigv4_params.method                 = r->method_name;
-    sigv4_params.uri.data               = r->uri_start;
-    if (r->args_start)
-    {
-        sigv4_params.uri.len  = r->args_start - r->uri_start - 1;
-    }
-    else
-    {
-        sigv4_params.uri.len  = r->uri_end - r->uri_start;
-    }
+    sigv4_params.uri                    = r->uri;
     sigv4_params.query_str              = r->args;
     sigv4_params.host                   = lcf->aws_service_endpoint;
     sigv4_params.x_amz_date             = sigv4_x_amz_date;
