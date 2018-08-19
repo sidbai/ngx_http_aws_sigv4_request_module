@@ -452,7 +452,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
     }
     else
     {
-        sigv4_params.uri.len  = r->uri_end - r->uri_start - 1;
+        sigv4_params.uri.len  = r->uri_end - r->uri_start;
     }
     sigv4_params.query_str              = r->args;
     sigv4_params.host                   = lcf->aws_service_endpoint;
