@@ -424,6 +424,15 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
     sigv4_params.region                 = lcf->aws_region;
     sigv4_params.cached_signing_key     = &lcf->cached_signing_key;
     sigv4_params.cached_date_yyyymmdd   = &lcf->cached_date_yyyymmdd;
+    if (ngx_strncmp(sigv4_params.service.data, "s3", 2) == 0
+        || sigv4_params.service.len == 2)
+    {
+        sigv4_params.payload_sign_opt = aws_sigv4_unsigned_payload;
+    }
+    else
+    {
+        sigv4_params.payload_sign_opt = aws_sigv4_signed_payload;
+    }
 
     aws_sigv4_header_t auth_header;
     int rc = aws_sigv4_sign(r, &sigv4_params, &auth_header);

@@ -13,7 +13,7 @@
 #define AWS_SIGV4_KEY_BUF_LEN                 33
 #define AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS    50
 
-typedef int (*aws_sigv4_compar_func_t)(const void*, const void*);
+typedef int (*aws_sigv4_compare_func_t)(const void*, const void*);
 
 static inline int aws_sigv4_empty_str(ngx_str_t* str)
 {
@@ -27,7 +27,7 @@ static int aws_sigv4_query_param_cmp(aws_sigv4_query_param_t* p1,
     return strncmp((char*) p1->name.data, (char*) p2->name.data, len);
 }
 
-static unsigned char* query_params_encode(unsigned char*            dst_cstr,
+static unsigned char* construct_query_str(unsigned char*            dst_cstr,
                                           aws_sigv4_query_param_t*  query_params,
                                           size_t                    query_num)
 {
@@ -180,9 +180,9 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
         aws_sigv4_query_param_t query_params[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
         size_t query_num = 0;
         parse_query_params(&sigv4_params->query_str, query_params, &query_num);
-        qsort(query_params, query_num, sizeof(aws_sigv4_query_param_t),
-              (aws_sigv4_compar_func_t) aws_sigv4_query_param_cmp);
-        str = query_params_encode(str, query_params, query_num);
+        ngx_qsort(query_params, query_num, sizeof(aws_sigv4_query_param_t),
+                  (aws_sigv4_compare_func_t) aws_sigv4_query_param_cmp);
+        str = construct_query_str(str, query_params, query_num);
     }
     *(str++) = '\n';
 
@@ -196,17 +196,22 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
     str += signed_headers.len;
     *(str++) = '\n';
 
-    // disable payload signing for now
-    /*
-    ngx_str_t hex_sha256 = { .data = str };
-    get_hex_sha256(&sigv4_params->payload, &hex_sha256);
-    str += hex_sha256.len;
-    */
-
-    /* TODO: make payload signing option flexible */
-    size_t option_len   = strlen(AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION);
-    strncpy((char*) str, AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION, option_len + 1);
-    str += option_len;
+    if (sigv4_params->payload_sign_opt == aws_sigv4_signed_payload)
+    {
+        ngx_str_t hex_sha256 = { .data = str };
+        get_hex_sha256(&sigv4_params->payload, &hex_sha256);
+        str += hex_sha256.len;
+    }
+    else if (sigv4_params->payload_sign_opt == aws_sigv4_unsigned_payload)
+    {
+        size_t option_len   = strlen(AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION);
+        strncpy((char*) str, AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION, option_len + 1);
+        str += option_len;
+    }
+    else
+    {
+        // Unsupported option
+    }
 
     canonical_request->len = str - canonical_request->data;
 }

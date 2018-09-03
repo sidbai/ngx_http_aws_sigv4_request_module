@@ -9,6 +9,11 @@
 #define AWS_SIGV4_INVALID_INPUT_ERROR      -1
 #define AWS_SIGV4_OK                        0
 
+typedef enum {
+    aws_sigv4_signed_payload = 0,
+    aws_sigv4_unsigned_payload
+} aws_sigv4_payload_sign_opt_e;
+
 typedef struct aws_sigv4_header_s {
     ngx_str_t name;
     ngx_str_t value;
@@ -21,25 +26,26 @@ typedef struct aws_sigv4_query_param_s {
 
 typedef struct aws_sigv4_params_s {
     /* AWS credential parameters */
-    ngx_str_t   secret_access_key;
-    ngx_str_t   access_key_id;
+    ngx_str_t                     secret_access_key;
+    ngx_str_t                     access_key_id;
 
     /* HTTP request parameters */
-    ngx_str_t   method;
-    ngx_str_t   uri;
-    ngx_str_t   query_str;
-    ngx_str_t   host;
+    ngx_str_t                     method;
+    ngx_str_t                     uri;
+    ngx_str_t                     query_str;
+    ngx_str_t                     host;
     /* x-amz-date header value in ISO8601 format */
-    ngx_str_t   x_amz_date;
-    ngx_str_t   payload;
+    ngx_str_t                     x_amz_date;
+    ngx_str_t                     payload;
+    aws_sigv4_payload_sign_opt_e  payload_sign_opt;
 
     /* AWS service parameters */
-    ngx_str_t   service;
-    ngx_str_t   region;
+    ngx_str_t                     service;
+    ngx_str_t                     region;
 
     /* cached values for perf improvement */
-    ngx_str_t  *cached_signing_key;
-    ngx_str_t  *cached_date_yyyymmdd;
+    ngx_str_t                    *cached_signing_key;
+    ngx_str_t                    *cached_date_yyyymmdd;
 } aws_sigv4_params_t;
 
 /** @brief perform sigv4 signing
