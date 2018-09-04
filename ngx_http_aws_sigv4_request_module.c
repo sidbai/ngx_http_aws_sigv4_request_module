@@ -606,7 +606,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
     else
     {
         sp->payload_sign_opt = aws_sigv4_signed_payload;
-        if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT)
+        if (r->method & (NGX_HTTP_POST | NGX_HTTP_PUT))
         {
             if (!ctx->read_body_done)
             {
