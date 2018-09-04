@@ -66,7 +66,7 @@ http
             internal;
             resolver 8.8.8.8;
             aws_service region=us-east-2 name=monitoring endpoint=monitoring.us-east-2.amazonaws.com;
-            aws_access_key_path /home/ec2-user/dev/creds/sidbai-s3.txt;
+            aws_access_key_path /path/to/aws_access_key_file;
             aws_sigv4_request on;
 
             proxy_pass https://$aws_sigv4_host;
