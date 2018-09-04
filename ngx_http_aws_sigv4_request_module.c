@@ -24,7 +24,7 @@ typedef struct {
 
 typedef struct {
     aws_sigv4_params_t *sigv4_params;
-    unsigned int        done:1;
+    unsigned int        read_body_done:1;
 } ngx_http_aws_sigv4_request_ctx_t;
 
 static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf);
@@ -453,20 +453,11 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
         }
     }
 
-    ngx_int_t rc = ngx_http_aws_sigv4_request_sign(ctx->sigv4_params, r);
-    if (rc != NGX_OK)
-    {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "failed to perform sigv4 signing with return code: %d", rc);
-        ngx_http_finalize_request(r, NGX_HTTP_REQUEST_ENTITY_TOO_LARGE);
-        return;
-    }
-
-    /* FIXME: current the next handler is not called */
     r->main->count--;
-    if (!ctx->done)
+    if (!ctx->read_body_done)
     {
-        ctx->done = 1;
+        ctx->read_body_done = 1;
+        // run core phase handlers again to process request
         ngx_http_core_run_phases(r);
     }
 }
@@ -568,8 +559,21 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
             return NGX_ERROR;
         }
 
-        ctx->done = 0;
+        ctx->read_body_done = 0;
         ngx_http_set_ctx(r, ctx, ngx_http_aws_sigv4_request_module);
+    }
+    else if (ctx->read_body_done)
+    {
+        ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
+                      "finished reading client body, now perform sigv4 signing");
+        goto sigv4_sign;
+    }
+    else
+    {
+        // this should not happen
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "sigv4 request handler is called again but client body read is not done");
+        return NGX_ERROR;
     }
 
     ngx_str_t sigv4_x_amz_date;
@@ -604,7 +608,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
         sp->payload_sign_opt = aws_sigv4_signed_payload;
         if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT)
         {
-            if (!ctx->done)
+            if (!ctx->read_body_done)
             {
                 rc = ngx_http_read_client_request_body(r, ngx_http_aws_sigv4_request_client_body_read_handler);
                 if (rc == NGX_ERROR)
@@ -616,12 +620,17 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
                     r->main->count--;
                     return rc;
                 }
+                /*
+                 * mark the request processing done
+                 * client body read handler will re-run core phase handlers once
+                 */
+                return NGX_DONE;
             }
-            return NGX_DONE;
         }
     }
 
-    rc = ngx_http_aws_sigv4_request_sign(sp, r);
+sigv4_sign:
+    rc = ngx_http_aws_sigv4_request_sign(ctx->sigv4_params, r);
     if (rc != NGX_OK)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
