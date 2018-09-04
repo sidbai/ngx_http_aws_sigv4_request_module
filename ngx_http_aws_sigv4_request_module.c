@@ -8,6 +8,7 @@
 #define AWS_SIGV4_X_AMZ_DATE_HEADER             "x-amz-date"
 #define AWS_SIGV4_X_AMZ_CONTENT_SHA256_HEADER   "x-amz-content-sha256"
 #define AWS_SIGV4_X_AMZ_CONTENT_SHA256_VALUE    "UNSIGNED-PAYLOAD"
+#define AWS_SIGV4_X_AMZ_MAX_CLIENT_BODY_SIZE    10 * 1024 * 1024
 
 typedef struct {
     ngx_flag_t  aws_sigv4_enabled;
@@ -22,7 +23,8 @@ typedef struct {
 } ngx_http_aws_sigv4_request_conf_t;
 
 typedef struct {
-    ngx_str_t   sigv4_host;
+    aws_sigv4_params_t *sigv4_params;
+    unsigned int        done:1;
 } ngx_http_aws_sigv4_request_ctx_t;
 
 static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf);
@@ -46,6 +48,14 @@ static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
                                             void *conf);
 
 static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf);
+
+static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request_t *r);
+
+static ngx_int_t ngx_http_aws_sigv4_request_set_service_headers(ngx_str_t *service,
+                                                                ngx_http_request_t *r);
+
+static ngx_int_t ngx_http_aws_sigv4_request_sign(aws_sigv4_params_t *sp,
+                                                 ngx_http_request_t *r);
 
 static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r);
 
@@ -155,7 +165,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t 
     switch (data)
     {
         case ngx_http_aws_sigv4_var_host:
-            var = &ctx->sigv4_host;
+            var = &ctx->sigv4_params->host;
             break;
         default:
             ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
@@ -336,11 +346,11 @@ static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
 
-    if (ngx_strncmp(cmd_args[1].data, "on", 2) == 0 || cmd_args[1].len == 2)
+    if (ngx_strncmp(cmd_args[1].data, "on", 2) == 0 && cmd_args[1].len == 2)
     {
         lcf->aws_sigv4_enabled = 1;
     }
-    else if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0 || cmd_args[1].len == 3)
+    else if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0 && cmd_args[1].len == 3)
     {
         lcf->aws_sigv4_enabled = 0;
     }
@@ -367,7 +377,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf)
     {
         return NGX_ERROR;
     }
-    h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
+    h = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
     if (h == NULL)
     {
         return NGX_ERROR;
@@ -376,8 +386,165 @@ static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf)
     return NGX_OK;
 }
 
+static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request_t *r)
+{
+    ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_aws_sigv4_request_module);
+    if (ctx == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "aws sigv4 request module is NULL");
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+
+    if (r->headers_in.content_length_n != -1
+        && !r->discard_body
+        && r->headers_in.content_length_n > AWS_SIGV4_X_AMZ_MAX_CLIENT_BODY_SIZE)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "client body is too big for sigv4 signing");
+        ngx_http_finalize_request(r, NGX_HTTP_REQUEST_ENTITY_TOO_LARGE);
+        return;
+    }
+
+    ctx->sigv4_params->payload.len  = r->headers_in.content_length_n;
+    ctx->sigv4_params->payload.data = ngx_pcalloc(r->pool, r->headers_in.content_length_n);
+    unsigned char *data = ctx->sigv4_params->payload.data;
+    if (data == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "failed to allocate memory for sigv4 request payload");
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+
+    size_t n      = 0;
+    size_t offset = 0;
+    if (r->request_body->temp_file == NULL)
+    {
+        ngx_buf_t   *buf;
+        ngx_chain_t *cl;
+        cl = r->request_body->bufs;
+
+        for ( ; cl != NULL; cl = cl->next)
+        {
+            buf = cl->buf;
+            n = buf->last - buf->pos;
+            if (offset >= (size_t) r->headers_in.content_length_n)
+            {
+                break;
+            }
+            ngx_memcpy(data + offset, buf->pos, n);
+            offset += n;
+        }
+
+    }
+    else
+    {
+        for ( ;; )
+        {
+            n = ngx_read_file(&r->request_body->temp_file->file,
+                              data + offset, 4096, offset);
+            if (n <= 0)
+            {
+                break;
+            }
+            offset += n;
+        }
+    }
+
+    ngx_int_t rc = ngx_http_aws_sigv4_request_sign(ctx->sigv4_params, r);
+    if (rc != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "failed to perform sigv4 signing with return code: %d", rc);
+        ngx_http_finalize_request(r, NGX_HTTP_REQUEST_ENTITY_TOO_LARGE);
+        return;
+    }
+
+    /* FIXME: current the next handler is not called */
+    r->main->count--;
+    if (!ctx->done)
+    {
+        ctx->done = 1;
+        ngx_http_core_run_phases(r);
+    }
+}
+
+static ngx_int_t ngx_http_aws_sigv4_request_set_service_headers(ngx_str_t *service,
+                                                                ngx_http_request_t *r)
+{
+    if (service == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "null service ptr");
+        return NGX_ERROR;
+    }
+    if (ngx_strncmp(service->data, "s3", 2) == 0 && service->len == 2)
+    {
+        ngx_table_elt_t *h_x_amz_content_sha256 = ngx_list_push(&r->headers_in.headers);
+        if (h_x_amz_content_sha256 == NULL)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "failed to allocate memory for x-amz-content-sha256 header");
+            return NGX_ERROR;
+        }
+        /* s3 supports unsigned payload option */
+        h_x_amz_content_sha256->key         = (ngx_str_t) ngx_string(AWS_SIGV4_X_AMZ_CONTENT_SHA256_HEADER);
+        h_x_amz_content_sha256->lowcase_key = (u_char *) AWS_SIGV4_X_AMZ_CONTENT_SHA256_HEADER;
+        h_x_amz_content_sha256->value       = (ngx_str_t) ngx_string(AWS_SIGV4_X_AMZ_CONTENT_SHA256_VALUE);
+    }
+    return NGX_OK;
+}
+
+static ngx_int_t ngx_http_aws_sigv4_request_sign(aws_sigv4_params_t *sp,
+                                                 ngx_http_request_t *r)
+{
+    aws_sigv4_header_t auth_header;
+    ngx_int_t rc = aws_sigv4_sign(r, sp, &auth_header);
+    if (rc != AWS_SIGV4_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "failed to perform sigv4 signing with return code: %d", rc);
+        return NGX_ERROR;
+    }
+
+    ngx_table_elt_t *h_authorization  = ngx_list_push(&r->headers_in.headers);
+    ngx_table_elt_t *h_x_amz_date     = ngx_list_push(&r->headers_in.headers);
+    if (h_authorization == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "failed to allocate memory for Authorization header");
+        return NGX_ERROR;
+    }
+    if (h_x_amz_date == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "failed to allocate memory for x-amz-date header");
+        return NGX_ERROR;
+    }
+
+    h_authorization->key          = (ngx_str_t) ngx_string(AWS_SIGV4_AUTHORIZATION_HEADER);
+    h_authorization->lowcase_key  = (u_char *) AWS_SIGV4_AUTHORIZATION_HEADER_LOWCASE;
+    h_authorization->value        = auth_header.value;
+    r->headers_in.authorization   = h_authorization;
+
+    h_x_amz_date->key             = (ngx_str_t) ngx_string(AWS_SIGV4_X_AMZ_DATE_HEADER);
+    h_x_amz_date->lowcase_key     = (u_char *) AWS_SIGV4_X_AMZ_DATE_HEADER;
+    h_x_amz_date->value           = sp->x_amz_date;
+
+    rc = ngx_http_aws_sigv4_request_set_service_headers(&sp->service, r);
+    if (rc != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "failed to set service specific headers with return code: %d", rc);
+    }
+    return rc;
+}
+
 static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
 {
+    ngx_int_t rc = NGX_OK;
     ngx_http_aws_sigv4_request_conf_t *lcf;
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_aws_sigv4_request_module);
     if (lcf == NULL)
@@ -400,10 +567,10 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
                           "failed to allocate memory for sigv4 request context");
             return NGX_ERROR;
         }
+
+        ctx->done = 0;
         ngx_http_set_ctx(r, ctx, ngx_http_aws_sigv4_request_module);
     }
-
-    ctx->sigv4_host = lcf->aws_service_endpoint;
 
     ngx_str_t sigv4_x_amz_date;
     sigv4_x_amz_date.len  = strlen("20170101T150101Z");
@@ -412,72 +579,55 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
     strftime((char*) sigv4_x_amz_date.data, sigv4_x_amz_date.len + 1,
              "%Y%m%dT%H%M%SZ", gmtime(&t));
 
-    aws_sigv4_params_t sigv4_params     = { 0 };
-    sigv4_params.secret_access_key      = lcf->secret_access_key;
-    sigv4_params.access_key_id          = lcf->access_key_id;
-    sigv4_params.method                 = r->method_name;
-    sigv4_params.uri                    = r->uri;
-    sigv4_params.query_str              = r->args;
-    sigv4_params.host                   = lcf->aws_service_endpoint;
-    sigv4_params.x_amz_date             = sigv4_x_amz_date;
-    sigv4_params.service                = lcf->aws_service_name;
-    sigv4_params.region                 = lcf->aws_region;
-    sigv4_params.cached_signing_key     = &lcf->cached_signing_key;
-    sigv4_params.cached_date_yyyymmdd   = &lcf->cached_date_yyyymmdd;
-    if (ngx_strncmp(sigv4_params.service.data, "s3", 2) == 0
-        || sigv4_params.service.len == 2)
+    ctx->sigv4_params = ngx_pcalloc(r->pool, sizeof(aws_sigv4_params_t));
+    aws_sigv4_params_t *sp    = ctx->sigv4_params;
+    sp->secret_access_key     = lcf->secret_access_key;
+    sp->access_key_id         = lcf->access_key_id;
+    sp->method                = r->method_name;
+    sp->uri                   = r->uri;
+    sp->query_str             = r->args;
+    sp->host                  = lcf->aws_service_endpoint;
+    sp->x_amz_date            = sigv4_x_amz_date;
+    sp->service               = lcf->aws_service_name;
+    sp->region                = lcf->aws_region;
+    sp->cached_signing_key    = &lcf->cached_signing_key;
+    sp->cached_date_yyyymmdd  = &lcf->cached_date_yyyymmdd;
+
+    /* s3 supports unsigned payload option */
+    if (ngx_strncmp(sp->service.data, "s3", 2) == 0
+        && sp->service.len == 2)
     {
-        sigv4_params.payload_sign_opt = aws_sigv4_unsigned_payload;
+        sp->payload_sign_opt = aws_sigv4_unsigned_payload;
     }
     else
     {
-        sigv4_params.payload_sign_opt = aws_sigv4_signed_payload;
+        sp->payload_sign_opt = aws_sigv4_signed_payload;
+        if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT)
+        {
+            if (!ctx->done)
+            {
+                rc = ngx_http_read_client_request_body(r, ngx_http_aws_sigv4_request_client_body_read_handler);
+                if (rc == NGX_ERROR)
+                {
+                    return rc;
+                }
+                if (rc >= NGX_HTTP_SPECIAL_RESPONSE)
+                {
+                    r->main->count--;
+                    return rc;
+                }
+            }
+            return NGX_DONE;
+        }
     }
 
-    aws_sigv4_header_t auth_header;
-    int rc = aws_sigv4_sign(r, &sigv4_params, &auth_header);
-    if (rc != AWS_SIGV4_OK)
+    rc = ngx_http_aws_sigv4_request_sign(sp, r);
+    if (rc != NGX_OK)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to perform sigv4 signing with return code: %d", rc);
-        return NGX_ERROR;
+        return rc;
     }
-
-    ngx_table_elt_t *h_authorization        = ngx_list_push(&r->headers_in.headers);
-    ngx_table_elt_t *h_x_amz_date           = ngx_list_push(&r->headers_in.headers);
-    ngx_table_elt_t *h_x_amz_content_sha256 = ngx_list_push(&r->headers_in.headers);
-    if (h_authorization == NULL)
-    {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "failed to allocate memory for Authorization header");
-        return NGX_ERROR;
-    }
-    if (h_x_amz_date == NULL)
-    {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "failed to allocate memory for x-amz-date header");
-        return NGX_ERROR;
-    }
-    if (h_x_amz_content_sha256 == NULL)
-    {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "failed to allocate memory for x-amz-content-sha256 header");
-        return NGX_ERROR;
-    }
-
-    h_authorization->key                = (ngx_str_t) ngx_string(AWS_SIGV4_AUTHORIZATION_HEADER);
-    h_authorization->lowcase_key        = (u_char *) AWS_SIGV4_AUTHORIZATION_HEADER_LOWCASE;
-    h_authorization->value              = auth_header.value;
-    r->headers_in.authorization         = h_authorization;
-
-    h_x_amz_date->key                   = (ngx_str_t) ngx_string(AWS_SIGV4_X_AMZ_DATE_HEADER);
-    h_x_amz_date->lowcase_key           = (u_char *) AWS_SIGV4_X_AMZ_DATE_HEADER;
-    h_x_amz_date->value                 = sigv4_x_amz_date;
-
-    /* currently we only support unsigned payload option */
-    h_x_amz_content_sha256->key         = (ngx_str_t) ngx_string(AWS_SIGV4_X_AMZ_CONTENT_SHA256_HEADER);
-    h_x_amz_content_sha256->lowcase_key = (u_char *) AWS_SIGV4_X_AMZ_CONTENT_SHA256_HEADER;
-    h_x_amz_content_sha256->value       = (ngx_str_t) ngx_string(AWS_SIGV4_X_AMZ_CONTENT_SHA256_VALUE);
 
     return NGX_DECLINED;
 }
