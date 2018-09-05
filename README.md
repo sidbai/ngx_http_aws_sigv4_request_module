@@ -138,18 +138,18 @@ this is a test file
 https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_PutMetricData.html
 
 ```
-$ curl -vv "http://localhost/my_cw/doc/2010-08-01/?Action=PutMetricData&Version=2010-08-01&Namespace=TestNamespace&MetricData.member.1.MetricName=buffers&MetricData.member.1.Unit=Bytes&MetricData.member.1.Value=231434333&MetricData.member.1.Dimensions.member.1.Name=InstanceType&MetricData.member.1.Dimensions.member.1.Value=m1.small"
+$ curl -vv "http://localhost/my_cw/doc/2010-08-01/?Action=PutMetricData&Version=2010-08-01&Namespace=TestNamespace1&MetricData.member.1.MetricName=buffers1&MetricData.member.1.Unit=Bytes&MetricData.member.1.Value=123"
 *   Trying 127.0.0.1...
 * TCP_NODELAY set
 * Connected to localhost (127.0.0.1) port 80 (#0)
-> GET /my_cw/doc/2010-08-01/?Action=PutMetricData&Version=2010-08-01&Namespace=TestNamespace&MetricData.member.1.MetricName=buffers&MetricData.member.1.Unit=Bytes&MetricData.member.1.Value=231434333&MetricData.member.1.Dimensions.member.1.Name=InstanceType&MetricData.member.1.Dimensions.member.1.Value=m1.small HTTP/1.1
+> GET /my_cw/doc/2010-08-01/?Action=PutMetricData&Version=2010-08-01&Namespace=TestNamespace1&MetricData.member.1.MetricName=buffers1&MetricData.member.1.Unit=Bytes&MetricData.member.1.Value=123 HTTP/1.1
 > Host: localhost
 > User-Agent: curl/7.55.1
 > Accept: */*
 >
 < HTTP/1.1 200 OK
 < Server: nginx/1.14.0
-< Date: Tue, 04 Sep 2018 04:37:54 GMT
+< Date: Wed, 05 Sep 2018 06:30:50 GMT
 < Content-Type: text/xml
 < Content-Length: 212
 < Connection: keep-alive
@@ -160,4 +160,44 @@ $ curl -vv "http://localhost/my_cw/doc/2010-08-01/?Action=PutMetricData&Version=
     <RequestId>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</RequestId>
   </ResponseMetadata>
 </PutMetricDataResponse>
+* Connection #0 to host localhost left intact
+
+$ curl -vv -X POST "http://localhost/my_cw/doc/2010-08-01/?Action=GetMetricData&Version=2010-08-01&MetricDataQueries.member.1.Id=a1&StartTime=2018-09-05T06%3A30%3A00Z&EndTime=2018-09-05T07%3A00%3A00Z&MetricDataQueries.member.1.MetricStat.Metric.Namespace=TestNamespace1&MetricDataQueries.member.1.MetricStat.Stat=Sum&MetricDataQueries.member.1.MetricStat.Period=5&MetricDataQueries.member.1.MetricStat.Metric.MetricName=buffers1"
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to localhost (127.0.0.1) port 80 (#0)
+> POST /my_cw/doc/2010-08-01/?Action=GetMetricData&Version=2010-08-01&MetricDataQueries.member.1.Id=a1&StartTime=2018-09-05T06%3A30%3A00Z&EndTime=2018-09-05T07%3A00%3A00Z&MetricDataQueries.member.1.MetricStat.Metric.Namespace=TestNamespace1&MetricDataQueries.member.1.MetricStat.Stat=Sum&MetricDataQueries.member.1.MetricStat.Period=5&MetricDataQueries.member.1.MetricStat.Metric.MetricName=buffers1 HTTP/1.1
+> Host: localhost
+> User-Agent: curl/7.55.1
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< Server: nginx/1.14.0
+< Date: Wed, 05 Sep 2018 06:35:17 GMT
+< Content-Type: text/xml
+< Content-Length: 594
+< Connection: keep-alive
+< x-amzn-RequestId: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+<
+<GetMetricDataResponse xmlns="http://monitoring.amazonaws.com/doc/2010-08-01/">
+  <GetMetricDataResult>
+    <MetricDataResults>
+      <member>
+        <Timestamps>
+          <member>2018-09-05T06:30:00Z</member>
+        </Timestamps>
+        <Values>
+          <member>123.0</member>
+        </Values>
+        <Id>a1</Id>
+        <Label>buffers1</Label>
+        <StatusCode>Complete</StatusCode>
+      </member>
+    </MetricDataResults>
+  </GetMetricDataResult>
+  <ResponseMetadata>
+    <RequestId>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</RequestId>
+  </ResponseMetadata>
+</GetMetricDataResponse>
+* Connection #0 to host localhost left intact
 ```
