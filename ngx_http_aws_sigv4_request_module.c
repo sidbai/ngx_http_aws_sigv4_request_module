@@ -407,6 +407,13 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
         return;
     }
 
+    if (r->headers_in.content_length_n <= 0)
+    {
+        ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0, "no client body");
+        ctx->sigv4_params->payload.len = 0;
+        goto read_done;
+    }
+
     ctx->sigv4_params->payload.len  = r->headers_in.content_length_n;
     ctx->sigv4_params->payload.data = ngx_pcalloc(r->pool, r->headers_in.content_length_n);
     unsigned char *data = ctx->sigv4_params->payload.data;
@@ -452,7 +459,7 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
             offset += n;
         }
     }
-
+read_done:
     r->main->count--;
     if (!ctx->read_body_done)
     {
@@ -622,7 +629,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
                 }
                 /*
                  * mark the request processing done
-                 * client body read handler will re-run core phase handlers once
+                 * client body read handler will re-run core phase handlers
                  */
                 return NGX_DONE;
             }
