@@ -13,29 +13,29 @@
 #define AWS_SIGV4_KEY_BUF_LEN                 33
 #define AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS    50
 
-typedef int (*aws_sigv4_compare_func_t)(const void*, const void*);
+typedef int (*aws_sigv4_compare_func_t) (const void*, const void*);
 
 static inline int aws_sigv4_empty_str(ngx_str_t* str)
 {
     return (str == NULL || str->data == NULL || str->len == 0) ? 1 : 0;
 }
 
-static int aws_sigv4_query_param_cmp(aws_sigv4_query_param_t* p1,
-                                     aws_sigv4_query_param_t* p2)
+static int aws_sigv4_kv_cmp(aws_sigv4_kv_t* p1,
+                            aws_sigv4_kv_t* p2)
 {
-    size_t len = p1->name.len <= p2->name.len ? p1->name.len : p2->name.len;
-    return strncmp((char*) p1->name.data, (char*) p2->name.data, len);
+    size_t len = p1->key.len <= p2->key.len ? p1->key.len : p2->key.len;
+    return strncmp((char*) p1->key.data, (char*) p2->key.data, len);
 }
 
-static unsigned char* construct_query_str(unsigned char*            dst_cstr,
-                                          aws_sigv4_query_param_t*  query_params,
-                                          size_t                    query_num)
+static unsigned char* construct_query_str(unsigned char*  dst_cstr,
+                                          aws_sigv4_kv_t* query_params,
+                                          size_t          query_num)
 {
     for (size_t i = 0; i < query_num; i++)
     {
         /* here we assume args are percent-encoded */
         dst_cstr = ngx_sprintf(dst_cstr, "%V=%V",
-                               &query_params[i].name, &query_params[i].value);
+                               &query_params[i].key, &query_params[i].value);
         if (i != query_num - 1)
         {
             *(dst_cstr++) = '&';
@@ -44,9 +44,9 @@ static unsigned char* construct_query_str(unsigned char*            dst_cstr,
     return dst_cstr;
 }
 
-static void parse_query_params(ngx_str_t*                query_str,
-                               aws_sigv4_query_param_t*  query_params,
-                               size_t*                   arr_len)
+static void parse_query_params(ngx_str_t*       query_str,
+                               aws_sigv4_kv_t*  query_params,
+                               size_t*          arr_len)
 {
     if (aws_sigv4_empty_str(query_str)
         || query_params == NULL)
@@ -56,19 +56,19 @@ static void parse_query_params(ngx_str_t*                query_str,
     }
     size_t idx = 0;
     unsigned char* c_ptr = query_str->data;
-    query_params[0].name.data = c_ptr;
+    query_params[0].key.data = c_ptr;
     /* here we assume query string are well-formed */
     while (c_ptr != query_str->data + query_str->len)
     {
         if (*c_ptr == '=')
         {
-            query_params[idx].name.len    = c_ptr - query_params[idx].name.data;
+            query_params[idx].key.len     = c_ptr - query_params[idx].key.data;
             query_params[idx].value.data  = ++c_ptr;
         }
         else if (*c_ptr == '&')
         {
             query_params[idx].value.len   = c_ptr - query_params[idx].value.data;
-            query_params[++idx].name.data = ++c_ptr;
+            query_params[++idx].key.data  = ++c_ptr;
         }
         else
         {
@@ -177,11 +177,11 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
     /* query string can be empty */
     if (!aws_sigv4_empty_str(&sigv4_params->query_str))
     {
-        aws_sigv4_query_param_t query_params[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
+        aws_sigv4_kv_t query_params[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
         size_t query_num = 0;
         parse_query_params(&sigv4_params->query_str, query_params, &query_num);
-        ngx_qsort(query_params, query_num, sizeof(aws_sigv4_query_param_t),
-                  (aws_sigv4_compare_func_t) aws_sigv4_query_param_cmp);
+        ngx_qsort(query_params, query_num, sizeof(aws_sigv4_kv_t),
+                  (aws_sigv4_compare_func_t) aws_sigv4_kv_cmp);
         str = construct_query_str(str, query_params, query_num);
     }
     *(str++) = '\n';
@@ -261,8 +261,8 @@ int aws_sigv4_sign(ngx_http_request_t* req,
         return AWS_SIGV4_MEMORY_ALLOCATION_ERROR;
     }
 
-    auth_header->name.data  = (unsigned char*) AWS_SIGV4_AUTH_HEADER_NAME;
-    auth_header->name.len   = strlen(AWS_SIGV4_AUTH_HEADER_NAME);
+    auth_header->key.data = (unsigned char*) AWS_SIGV4_AUTH_HEADER_NAME;
+    auth_header->key.len  = strlen(AWS_SIGV4_AUTH_HEADER_NAME);
 
     /* AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/<credential_scope> */
     unsigned char* str = auth_header->value.data;

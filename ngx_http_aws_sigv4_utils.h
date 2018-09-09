@@ -14,15 +14,12 @@ typedef enum {
     aws_sigv4_unsigned_payload
 } aws_sigv4_payload_sign_opt_e;
 
-typedef struct aws_sigv4_header_s {
-    ngx_str_t name;
+typedef struct aws_sigv4_kv_s {
+    ngx_str_t key;
     ngx_str_t value;
-} aws_sigv4_header_t;
+} aws_sigv4_kv_t;
 
-typedef struct aws_sigv4_query_param_s {
-    ngx_str_t name;
-    ngx_str_t value;
-} aws_sigv4_query_param_t;
+typedef aws_sigv4_kv_t aws_sigv4_header_t;
 
 typedef struct aws_sigv4_params_s {
     /* AWS credential parameters */
