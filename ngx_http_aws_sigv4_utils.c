@@ -15,29 +15,24 @@
 
 typedef int (*aws_sigv4_compare_func_t) (const void*, const void*);
 
-static inline int aws_sigv4_empty_str(ngx_str_t* str)
-{
+static inline int aws_sigv4_empty_str(ngx_str_t* str) {
     return (str == NULL || str->data == NULL || str->len == 0) ? 1 : 0;
 }
 
 static int aws_sigv4_kv_cmp(aws_sigv4_kv_t* p1,
-                            aws_sigv4_kv_t* p2)
-{
+                            aws_sigv4_kv_t* p2) {
     size_t len = p1->key.len <= p2->key.len ? p1->key.len : p2->key.len;
     return strncmp((char*) p1->key.data, (char*) p2->key.data, len);
 }
 
 static unsigned char* construct_query_str(unsigned char*  dst_cstr,
                                           aws_sigv4_kv_t* query_params,
-                                          size_t          query_num)
-{
-    for (size_t i = 0; i < query_num; i++)
-    {
+                                          size_t          query_num) {
+    for (size_t i = 0; i < query_num; i++) {
         /* here we assume args are percent-encoded */
         dst_cstr = ngx_sprintf(dst_cstr, "%V=%V",
                                &query_params[i].key, &query_params[i].value);
-        if (i != query_num - 1)
-        {
+        if (i != query_num - 1) {
             *(dst_cstr++) = '&';
         }
     }
@@ -46,11 +41,9 @@ static unsigned char* construct_query_str(unsigned char*  dst_cstr,
 
 static void parse_query_params(ngx_str_t*       query_str,
                                aws_sigv4_kv_t*  query_params,
-                               size_t*          arr_len)
-{
+                               size_t*          arr_len) {
     if (aws_sigv4_empty_str(query_str)
-        || query_params == NULL)
-    {
+        || query_params == NULL) {
         arr_len = 0;
         return;
     }
@@ -58,20 +51,14 @@ static void parse_query_params(ngx_str_t*       query_str,
     unsigned char* c_ptr = query_str->data;
     query_params[0].key.data = c_ptr;
     /* here we assume query string are well-formed */
-    while (c_ptr != query_str->data + query_str->len)
-    {
-        if (*c_ptr == '=')
-        {
+    while (c_ptr != query_str->data + query_str->len) {
+        if (*c_ptr == '=') {
             query_params[idx].key.len     = c_ptr - query_params[idx].key.data;
             query_params[idx].value.data  = ++c_ptr;
-        }
-        else if (*c_ptr == '&')
-        {
+        } else if (*c_ptr == '&') {
             query_params[idx].value.len   = c_ptr - query_params[idx].value.data;
             query_params[++idx].key.data  = ++c_ptr;
-        }
-        else
-        {
+        } else {
             c_ptr++;
         }
     }
@@ -79,20 +66,17 @@ static void parse_query_params(ngx_str_t*       query_str,
     *arr_len = idx + 1;
 }
 
-static void get_hexdigest(ngx_str_t* str_in, ngx_str_t* hex_out)
-{
+static void get_hexdigest(ngx_str_t* str_in, ngx_str_t* hex_out) {
     static const unsigned char digits[] = "0123456789abcdef";
     unsigned char* c_ptr = hex_out->data;
-    for (size_t i = 0; i < str_in->len; i++)
-    {
+    for (size_t i = 0; i < str_in->len; i++) {
         *(c_ptr++) = digits[(str_in->data[i] & 0xf0) >> 4];
         *(c_ptr++) = digits[str_in->data[i] & 0x0f];
     }
     hex_out->len = str_in->len * 2;
 }
 
-static void get_hex_sha256(ngx_str_t* str_in, ngx_str_t* hex_sha256_out)
-{
+static void get_hex_sha256(ngx_str_t* str_in, ngx_str_t* hex_sha256_out) {
     unsigned char sha256_buf[SHA256_DIGEST_LENGTH];
     SHA256_CTX ctx;
     SHA256_Init(&ctx);
@@ -103,8 +87,7 @@ static void get_hex_sha256(ngx_str_t* str_in, ngx_str_t* hex_sha256_out)
     get_hexdigest(&sha256_str, hex_sha256_out);
 }
 
-static void get_signing_key(aws_sigv4_params_t* sigv4_params, ngx_str_t* signing_key)
-{
+static void get_signing_key(aws_sigv4_params_t* sigv4_params, ngx_str_t* signing_key) {
     unsigned char key_buf[AWS_SIGV4_KEY_BUF_LEN]  = { 0 };
     unsigned char msg_buf[AWS_SIGV4_KEY_BUF_LEN]  = { 0 };
     ngx_str_t key = { .data = key_buf };
@@ -134,8 +117,7 @@ static void get_signing_key(aws_sigv4_params_t* sigv4_params, ngx_str_t* signing
 }
 
 static void get_credential_scope(aws_sigv4_params_t* sigv4_params,
-                                 ngx_str_t* credential_scope)
-{
+                                 ngx_str_t* credential_scope) {
     unsigned char* str = credential_scope->data;
     /* get date in yyyymmdd format */
     str = ngx_snprintf(str, 8, "%V", &sigv4_params->x_amz_date);
@@ -145,16 +127,14 @@ static void get_credential_scope(aws_sigv4_params_t* sigv4_params,
 }
 
 static void get_signed_headers(aws_sigv4_params_t* sigv4_params,
-                               ngx_str_t* signed_headers)
-{
+                               ngx_str_t* signed_headers) {
     /* TODO: Need to support additional headers and header sorting */
     signed_headers->len = ngx_sprintf(signed_headers->data, "host;x-amz-date")
                           - signed_headers->data;
 }
 
 static void get_canonical_headers(aws_sigv4_params_t* sigv4_params,
-                                  ngx_str_t* canonical_headers)
-{
+                                  ngx_str_t* canonical_headers) {
     /* TODO: Add logic to remove leading and trailing spaces for header values */
     canonical_headers->len = ngx_sprintf(canonical_headers->data,
                                          "host:%V\nx-amz-date:%V\n",
@@ -164,8 +144,7 @@ static void get_canonical_headers(aws_sigv4_params_t* sigv4_params,
 }
 
 static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
-                                  ngx_str_t* canonical_request)
-{
+                                  ngx_str_t* canonical_request) {
     unsigned char* str = canonical_request->data;
     str = ngx_sprintf(str, "%V\n", &sigv4_params->method);
     str = (unsigned char*) ngx_escape_uri(str,
@@ -175,8 +154,7 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
     *(str++) = '\n';
 
     /* query string can be empty */
-    if (!aws_sigv4_empty_str(&sigv4_params->query_str))
-    {
+    if (!aws_sigv4_empty_str(&sigv4_params->query_str)) {
         aws_sigv4_kv_t query_params[AWS_SIGV4_MAX_NUM_QUERY_COMPONENTS];
         size_t query_num = 0;
         parse_query_params(&sigv4_params->query_str, query_params, &query_num);
@@ -196,20 +174,15 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
     str += signed_headers.len;
     *(str++) = '\n';
 
-    if (sigv4_params->payload_sign_opt == aws_sigv4_signed_payload)
-    {
+    if (sigv4_params->payload_sign_opt == aws_sigv4_signed_payload) {
         ngx_str_t hex_sha256 = { .data = str };
         get_hex_sha256(&sigv4_params->payload, &hex_sha256);
         str += hex_sha256.len;
-    }
-    else if (sigv4_params->payload_sign_opt == aws_sigv4_unsigned_payload)
-    {
+    } else if (sigv4_params->payload_sign_opt == aws_sigv4_unsigned_payload) {
         size_t option_len   = strlen(AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION);
         strncpy((char*) str, AWS_SIGV4_UNSIGNED_PAYLOAD_OPTION, option_len + 1);
         str += option_len;
-    }
-    else
-    {
+    } else {
         // Unsupported option
     }
 
@@ -219,8 +192,7 @@ static void get_canonical_request(aws_sigv4_params_t* sigv4_params,
 static void get_string_to_sign(ngx_str_t* request_date,
                                ngx_str_t* credential_scope,
                                ngx_str_t* canonical_request,
-                               ngx_str_t* string_to_sign)
-{
+                               ngx_str_t* string_to_sign) {
     unsigned char* str = string_to_sign->data;
     str =  ngx_sprintf(str, "AWS4-HMAC-SHA256\n%V\n%V\n",
                        request_date, credential_scope);
@@ -234,8 +206,7 @@ static void get_string_to_sign(ngx_str_t* request_date,
 
 int aws_sigv4_sign(ngx_http_request_t* req,
                    aws_sigv4_params_t* sigv4_params,
-                   aws_sigv4_header_t* auth_header)
-{
+                   aws_sigv4_header_t* auth_header) {
     if (auth_header == NULL
         || sigv4_params == NULL
         || aws_sigv4_empty_str(&sigv4_params->secret_access_key)
@@ -245,8 +216,7 @@ int aws_sigv4_sign(ngx_http_request_t* req,
         || aws_sigv4_empty_str(&sigv4_params->host)
         || aws_sigv4_empty_str(&sigv4_params->x_amz_date)
         || aws_sigv4_empty_str(&sigv4_params->region)
-        || aws_sigv4_empty_str(&sigv4_params->service))
-    {
+        || aws_sigv4_empty_str(&sigv4_params->service)) {
         ngx_log_error(NGX_LOG_EMERG, req->connection->log, 0,
                       "invalid input for func: %s", __func__);
         return AWS_SIGV4_INVALID_INPUT_ERROR;
@@ -254,8 +224,7 @@ int aws_sigv4_sign(ngx_http_request_t* req,
 
     auth_header->value.data = ngx_pcalloc(req->pool,
                                           AWS_SIGV4_AUTH_HEADER_MAX_LEN * sizeof(unsigned char));
-    if (auth_header->value.data == NULL)
-    {
+    if (auth_header->value.data == NULL) {
         ngx_log_error(NGX_LOG_EMERG, req->connection->log, 0,
                       "failed to allocate memory for authorization header value in request pool");
         return AWS_SIGV4_MEMORY_ALLOCATION_ERROR;
@@ -296,8 +265,7 @@ int aws_sigv4_sign(ngx_http_request_t* req,
                   "string to sign: %V", &string_to_sign);
     /* Task 3: Calculate the signature */
     /* 3.1: Derive signing key if cached signing key is invalid */
-    if (sigv4_params->cached_signing_key == NULL)
-    {
+    if (sigv4_params->cached_signing_key == NULL) {
         ngx_log_error(NGX_LOG_ERR, req->connection->log, 0,
                       "null cached signing key ptr");
         return AWS_SIGV4_INVALID_INPUT_ERROR;
@@ -305,15 +273,12 @@ int aws_sigv4_sign(ngx_http_request_t* req,
     /* cached signing key is no longer valid */
     if (sigv4_params->cached_signing_key->len == 0
         || ngx_strncmp(sigv4_params->cached_date_yyyymmdd->data,
-                       sigv4_params->x_amz_date.data, 8) != 0)
-    {
+                       sigv4_params->x_amz_date.data, 8) != 0) {
         get_signing_key(sigv4_params, sigv4_params->cached_signing_key);
         strncpy((char*) sigv4_params->cached_date_yyyymmdd->data,
                 (char*) sigv4_params->x_amz_date.data, 9);
         sigv4_params->cached_date_yyyymmdd->len = 8;
-    }
-    else
-    {
+    } else {
         ngx_log_error(NGX_LOG_DEBUG, req->connection->log, 0,
                       "using cached signing key");
     }

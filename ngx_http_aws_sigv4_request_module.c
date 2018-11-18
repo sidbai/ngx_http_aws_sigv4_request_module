@@ -133,14 +133,11 @@ const ngx_http_variable_t ngx_http_aws_sigv4_request_vars[] = {
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
 };
 
-static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf)
-{
+static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf) {
     ngx_http_variable_t  *var, *v;
-    for (v = (ngx_http_variable_t *) ngx_http_aws_sigv4_request_vars; v->name.len; v++)
-    {
+    for (v = (ngx_http_variable_t *) ngx_http_aws_sigv4_request_vars; v->name.len; v++) {
         var = ngx_http_add_variable(cf, &v->name, v->flags);
-        if (var == NULL)
-        {
+        if (var == NULL) {
             return NGX_ERROR;
         }
         var->get_handler = v->get_handler;
@@ -151,19 +148,16 @@ static ngx_int_t ngx_http_aws_sigv4_request_add_variables(ngx_conf_t *cf)
 
 static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t *r,
                                                              ngx_http_variable_value_t *v,
-                                                             uintptr_t data)
-{
+                                                             uintptr_t data) {
     ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_aws_sigv4_request_module);
-    if (ctx == NULL)
-    {
+    if (ctx == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "aws sigv4 request module is NULL");
         return NGX_ERROR;
     }
 
     ngx_str_t *var = NULL;
-    switch (data)
-    {
+    switch (data) {
         case ngx_http_aws_sigv4_var_host:
             var = &ctx->sigv4_params->host;
             break;
@@ -172,16 +166,13 @@ static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t 
                           "aws sigv4 request variable %d is not recognized", data);
     }
 
-    if (var != NULL && var->data != NULL)
-    {
+    if (var != NULL && var->data != NULL) {
         v->data         = var->data;
         v->len          = var->len;
         v->valid        = 1;
         v->no_cacheable = 0;
         v->not_found    = 0;
-    }
-    else
-    {
+    } else {
         v->data         = NULL;
         v->len          = 0;
         v->valid        = 0;
@@ -191,12 +182,10 @@ static ngx_int_t ngx_http_aws_sigv4_request_variable_handler(ngx_http_request_t 
     return NGX_OK;
 }
 
-static void *ngx_http_aws_sigv4_request_create_conf(ngx_conf_t *cf)
-{
+static void *ngx_http_aws_sigv4_request_create_conf(ngx_conf_t *cf) {
     ngx_http_aws_sigv4_request_conf_t *lcf;
     lcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_aws_sigv4_request_conf_t));
-    if (lcf == NULL)
-    {
+    if (lcf == NULL) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "failed to allocate memory in conf pool");
     }
@@ -206,21 +195,18 @@ static void *ngx_http_aws_sigv4_request_create_conf(ngx_conf_t *cf)
 
 static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
                                               ngx_command_t *cmd,
-                                              void *conf)
-{
+                                              void *conf) {
     ngx_http_aws_sigv4_request_conf_t *lcf = conf;
     ngx_str_t *cmd_args;
     cmd_args = cf->args->elts;
-    if (lcf->access_key_path.data != NULL)
-    {
+    if (lcf->access_key_path.data != NULL) {
         return "is duplicate";
     }
     lcf->access_key_path  = cmd_args[1];
 
     char* ret = NGX_CONF_OK;
     /* load aws access key from file */
-    if (!lcf->access_key_path.len || !lcf->access_key_path.data)
-    {
+    if (!lcf->access_key_path.len || !lcf->access_key_path.data) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "empty access key path");
         return NGX_CONF_ERROR;
@@ -230,8 +216,7 @@ static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
     key_file.log    = cf->log;
     key_file.offset = 0;
     key_file.fd     = ngx_open_file(key_file.name.data, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
-    if (key_file.fd == NGX_INVALID_FILE)
-    {
+    if (key_file.fd == NGX_INVALID_FILE) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            ngx_open_file_n " access key file \"%V\" failed due to invalid file",
                            &(key_file.name));
@@ -239,8 +224,7 @@ static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
     }
 
     ngx_file_info_t key_file_info;
-    if (ngx_fd_info(key_file.fd, &key_file_info) == NGX_FILE_ERROR)
-    {
+    if (ngx_fd_info(key_file.fd, &key_file_info) == NGX_FILE_ERROR) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            ngx_fd_info_n " access key file \"%V\" failed",
                            &(key_file.name));
@@ -249,16 +233,14 @@ static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
     }
     ssize_t size    = ngx_file_size(&key_file_info);
     u_char* key_buf = ngx_pcalloc(cf->pool, size);
-    if (key_buf == NULL)
-    {
+    if (key_buf == NULL) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "failed to allocate memory in conf pool");
         ret = NGX_CONF_ERROR;
         goto cleanup;
     }
     ssize_t n = ngx_read_file(&key_file, key_buf, size, 0);
-    if (n != size)
-    {
+    if (n != size) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "failed to read access key file \"%V\"",
                            &(key_file.name));
@@ -272,13 +254,11 @@ static char *ngx_http_aws_access_key_path_set(ngx_conf_t *cf,
     lcf->secret_access_key.data = nl + 1;
     lcf->secret_access_key.len  = (key_buf + size) - (nl + 1);
     /* remove extra newline */
-    if (lcf->secret_access_key.data[lcf->secret_access_key.len - 1] == '\n')
-    {
+    if (lcf->secret_access_key.data[lcf->secret_access_key.len - 1] == '\n') {
         lcf->secret_access_key.len--;
     }
 cleanup:
-    if (ngx_close_file(key_file.fd) == NGX_FILE_ERROR)
-    {
+    if (ngx_close_file(key_file.fd) == NGX_FILE_ERROR) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            ngx_close_file_n " access key file \"%V\" failed",
                            &(key_file.name));
@@ -288,42 +268,32 @@ cleanup:
 
 static char *ngx_http_aws_service_set(ngx_conf_t *cf,
                                       ngx_command_t *cmd,
-                                      void *conf)
-{
+                                      void *conf) {
     ngx_http_aws_sigv4_request_conf_t *lcf = conf;
     ngx_str_t *cmd_args;
     cmd_args = cf->args->elts;
     ngx_uint_t  i;
     ngx_flag_t has_region = 0, has_name = 0, has_endpoint = 0;
-    for (i = 1; i < cf->args->nelts; i++)
-    {
-        if (ngx_strncmp(cmd_args[i].data, "region=", 7) == 0)
-        {
+    for (i = 1; i < cf->args->nelts; i++) {
+        if (ngx_strncmp(cmd_args[i].data, "region=", 7) == 0) {
             has_region = 1;
             lcf->aws_region.data  = cmd_args[i].data + 7;
             lcf->aws_region.len   = cmd_args[i].len - 7;
-        }
-        else if (ngx_strncmp(cmd_args[i].data, "name=", 5) == 0)
-        {
+        } else if (ngx_strncmp(cmd_args[i].data, "name=", 5) == 0) {
             has_name = 1;
             lcf->aws_service_name.data  = cmd_args[i].data + 5;
             lcf->aws_service_name.len   = cmd_args[i].len - 5;
-        }
-        else if (ngx_strncmp(cmd_args[i].data, "endpoint=", 9) == 0)
-        {
+        } else if (ngx_strncmp(cmd_args[i].data, "endpoint=", 9) == 0) {
             has_endpoint = 1;
             lcf->aws_service_endpoint.data  = cmd_args[i].data + 9;
             lcf->aws_service_endpoint.len   = cmd_args[i].len - 9;
-        }
-        else
-        {
+        } else {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "unsupported argument: %V", &cmd_args[i]);
             return NGX_CONF_ERROR;
         }
     }
-    if (!has_region || !has_name || !has_endpoint)
-    {
+    if (!has_region || !has_name || !has_endpoint) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "missing arguments for aws_sigv4 directive");
         return NGX_CONF_ERROR;
@@ -333,29 +303,22 @@ static char *ngx_http_aws_service_set(ngx_conf_t *cf,
 
 static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
                                             ngx_command_t *cmd,
-                                            void *conf)
-{
+                                            void *conf) {
     ngx_http_aws_sigv4_request_conf_t *lcf  = conf;
     ngx_str_t *cmd_args;
     cmd_args = cf->args->elts;
     /* aws_access_key_path and aws_service need to be set first */
-    if (lcf->access_key_id.data == NULL || lcf->aws_region.data == NULL)
-    {
+    if (lcf->access_key_id.data == NULL || lcf->aws_region.data == NULL) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "missing aws access key and service configuration");
         return NGX_CONF_ERROR;
     }
 
-    if (ngx_strncmp(cmd_args[1].data, "on", 2) == 0 && cmd_args[1].len == 2)
-    {
+    if (ngx_strncmp(cmd_args[1].data, "on", 2) == 0 && cmd_args[1].len == 2) {
         lcf->aws_sigv4_enabled = 1;
-    }
-    else if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0 && cmd_args[1].len == 3)
-    {
+    } else if (ngx_strncmp(cmd_args[1].data, "off", 3) == 0 && cmd_args[1].len == 3) {
         lcf->aws_sigv4_enabled = 0;
-    }
-    else
-    {
+    } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid argument: %V", &cmd_args[1]);
         return NGX_CONF_ERROR;
@@ -367,30 +330,25 @@ static char *ngx_http_aws_sigv4_request_set(ngx_conf_t *cf,
     return NGX_CONF_OK;
 }
 
-static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf)
-{
+static ngx_int_t ngx_http_aws_sigv4_request_init(ngx_conf_t *cf) {
     ngx_http_handler_pt         *h = NULL;
     ngx_http_core_main_conf_t   *cmcf = NULL;
 
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
-    if (cmcf == NULL)
-    {
+    if (cmcf == NULL) {
         return NGX_ERROR;
     }
     h = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
-    if (h == NULL)
-    {
+    if (h == NULL) {
         return NGX_ERROR;
     }
     *h = ngx_http_aws_sigv4_request_handler;
     return NGX_OK;
 }
 
-static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request_t *r)
-{
+static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request_t *r) {
     ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_aws_sigv4_request_module);
-    if (ctx == NULL)
-    {
+    if (ctx == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "aws sigv4 request module is NULL");
         ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -399,16 +357,14 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
 
     if (r->headers_in.content_length_n != -1
         && !r->discard_body
-        && r->headers_in.content_length_n > AWS_SIGV4_X_AMZ_MAX_CLIENT_BODY_SIZE)
-    {
+        && r->headers_in.content_length_n > AWS_SIGV4_X_AMZ_MAX_CLIENT_BODY_SIZE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "client body is too big for sigv4 signing");
         ngx_http_finalize_request(r, NGX_HTTP_REQUEST_ENTITY_TOO_LARGE);
         return;
     }
 
-    if (r->headers_in.content_length_n <= 0)
-    {
+    if (r->headers_in.content_length_n <= 0) {
         ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0, "no client body");
         ctx->sigv4_params->payload.len = 0;
         goto read_done;
@@ -417,8 +373,7 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
     ctx->sigv4_params->payload.len  = r->headers_in.content_length_n;
     ctx->sigv4_params->payload.data = ngx_pcalloc(r->pool, r->headers_in.content_length_n);
     unsigned char *data = ctx->sigv4_params->payload.data;
-    if (data == NULL)
-    {
+    if (data == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to allocate memory for sigv4 request payload");
         ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -427,33 +382,26 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
 
     size_t n      = 0;
     size_t offset = 0;
-    if (r->request_body->temp_file == NULL)
-    {
+    if (r->request_body->temp_file == NULL) {
         ngx_buf_t   *buf;
         ngx_chain_t *cl;
         cl = r->request_body->bufs;
 
-        for ( ; cl != NULL; cl = cl->next)
-        {
+        for ( ; cl != NULL; cl = cl->next) {
             buf = cl->buf;
             n = buf->last - buf->pos;
-            if (offset >= (size_t) r->headers_in.content_length_n)
-            {
+            if (offset >= (size_t) r->headers_in.content_length_n) {
                 break;
             }
             ngx_memcpy(data + offset, buf->pos, n);
             offset += n;
         }
 
-    }
-    else
-    {
-        for ( ;; )
-        {
+    } else {
+        for ( ;; ) {
             n = ngx_read_file(&r->request_body->temp_file->file,
                               data + offset, 4096, offset);
-            if (n <= 0)
-            {
+            if (n <= 0) {
                 break;
             }
             offset += n;
@@ -461,8 +409,7 @@ static void ngx_http_aws_sigv4_request_client_body_read_handler(ngx_http_request
     }
 read_done:
     r->main->count--;
-    if (!ctx->read_body_done)
-    {
+    if (!ctx->read_body_done) {
         ctx->read_body_done = 1;
         // run core phase handlers again to process request
         ngx_http_core_run_phases(r);
@@ -470,19 +417,15 @@ read_done:
 }
 
 static ngx_int_t ngx_http_aws_sigv4_request_set_service_headers(ngx_str_t *service,
-                                                                ngx_http_request_t *r)
-{
-    if (service == NULL)
-    {
+                                                                ngx_http_request_t *r) {
+    if (service == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "null service ptr");
         return NGX_ERROR;
     }
-    if (ngx_strncmp(service->data, "s3", 2) == 0 && service->len == 2)
-    {
+    if (ngx_strncmp(service->data, "s3", 2) == 0 && service->len == 2) {
         ngx_table_elt_t *h_x_amz_content_sha256 = ngx_list_push(&r->headers_in.headers);
-        if (h_x_amz_content_sha256 == NULL)
-        {
+        if (h_x_amz_content_sha256 == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "failed to allocate memory for x-amz-content-sha256 header");
             return NGX_ERROR;
@@ -496,12 +439,10 @@ static ngx_int_t ngx_http_aws_sigv4_request_set_service_headers(ngx_str_t *servi
 }
 
 static ngx_int_t ngx_http_aws_sigv4_request_sign(aws_sigv4_params_t *sp,
-                                                 ngx_http_request_t *r)
-{
+                                                 ngx_http_request_t *r) {
     aws_sigv4_header_t auth_header;
     ngx_int_t rc = aws_sigv4_sign(r, sp, &auth_header);
-    if (rc != AWS_SIGV4_OK)
-    {
+    if (rc != AWS_SIGV4_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to perform sigv4 signing with return code: %d", rc);
         return NGX_ERROR;
@@ -509,14 +450,12 @@ static ngx_int_t ngx_http_aws_sigv4_request_sign(aws_sigv4_params_t *sp,
 
     ngx_table_elt_t *h_authorization  = ngx_list_push(&r->headers_in.headers);
     ngx_table_elt_t *h_x_amz_date     = ngx_list_push(&r->headers_in.headers);
-    if (h_authorization == NULL)
-    {
+    if (h_authorization == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to allocate memory for Authorization header");
         return NGX_ERROR;
     }
-    if (h_x_amz_date == NULL)
-    {
+    if (h_x_amz_date == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to allocate memory for x-amz-date header");
         return NGX_ERROR;
@@ -532,35 +471,29 @@ static ngx_int_t ngx_http_aws_sigv4_request_sign(aws_sigv4_params_t *sp,
     h_x_amz_date->value           = sp->x_amz_date;
 
     rc = ngx_http_aws_sigv4_request_set_service_headers(&sp->service, r);
-    if (rc != NGX_OK)
-    {
+    if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to set service specific headers with return code: %d", rc);
     }
     return rc;
 }
 
-static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
-{
+static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r) {
     ngx_int_t rc = NGX_OK;
     ngx_http_aws_sigv4_request_conf_t *lcf;
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_aws_sigv4_request_module);
-    if (lcf == NULL)
-    {
+    if (lcf == NULL) {
         return NGX_ERROR;
     }
-    if (!lcf->aws_sigv4_enabled)
-    {
+    if (!lcf->aws_sigv4_enabled) {
         ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
                       "aws sigv4 request is not enabled for this location");
         return NGX_DECLINED;
     }
     ngx_http_aws_sigv4_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_aws_sigv4_request_module);
-    if (ctx == NULL)
-    {
+    if (ctx == NULL) {
         ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_aws_sigv4_request_ctx_t));
-        if (ctx == NULL)
-        {
+        if (ctx == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "failed to allocate memory for sigv4 request context");
             return NGX_ERROR;
@@ -568,15 +501,11 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
 
         ctx->read_body_done = 0;
         ngx_http_set_ctx(r, ctx, ngx_http_aws_sigv4_request_module);
-    }
-    else if (ctx->read_body_done)
-    {
+    } else if (ctx->read_body_done) {
         ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
                       "finished reading client body, now perform sigv4 signing");
         goto sigv4_sign;
-    }
-    else
-    {
+    } else {
         // this should not happen
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "sigv4 request handler is called again but client body read is not done");
@@ -606,24 +535,17 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
 
     /* s3 supports unsigned payload option */
     if (ngx_strncmp(sp->service.data, "s3", 2) == 0
-        && sp->service.len == 2)
-    {
+        && sp->service.len == 2) {
         sp->payload_sign_opt = aws_sigv4_unsigned_payload;
-    }
-    else
-    {
+    } else {
         sp->payload_sign_opt = aws_sigv4_signed_payload;
-        if (r->method & (NGX_HTTP_POST | NGX_HTTP_PUT))
-        {
-            if (!ctx->read_body_done)
-            {
+        if (r->method & (NGX_HTTP_POST | NGX_HTTP_PUT)) {
+            if (!ctx->read_body_done) {
                 rc = ngx_http_read_client_request_body(r, ngx_http_aws_sigv4_request_client_body_read_handler);
-                if (rc == NGX_ERROR)
-                {
+                if (rc == NGX_ERROR) {
                     return rc;
                 }
-                if (rc >= NGX_HTTP_SPECIAL_RESPONSE)
-                {
+                if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
                     r->main->count--;
                     return rc;
                 }
@@ -638,8 +560,7 @@ static ngx_int_t ngx_http_aws_sigv4_request_handler(ngx_http_request_t *r)
 
 sigv4_sign:
     rc = ngx_http_aws_sigv4_request_sign(ctx->sigv4_params, r);
-    if (rc != NGX_OK)
-    {
+    if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to perform sigv4 signing with return code: %d", rc);
         return rc;
