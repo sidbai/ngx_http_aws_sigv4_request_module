@@ -1,7 +1,7 @@
+#include "ngx_http_aws_sigv4_utils.h"
 #include <string.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
-#include "ngx_http_aws_sigv4_utils.h"
 
 #define AWS_SIGV4_AUTH_HEADER_NAME            "Authorization"
 #define AWS_SIGV4_SIGNING_ALGORITHM           "AWS4-HMAC-SHA256"
