@@ -22,7 +22,12 @@ static inline int aws_sigv4_empty_str(ngx_str_t* str) {
 static int aws_sigv4_kv_cmp(aws_sigv4_kv_t* p1,
                             aws_sigv4_kv_t* p2) {
     size_t len = p1->key.len <= p2->key.len ? p1->key.len : p2->key.len;
-    return strncmp((char*) p1->key.data, (char*) p2->key.data, len);
+    /* sort duplicate parameters by value per Sigv4 spec */
+    if (*p1->key.data == *p2->key.data){
+        return strncmp((char*) p1->value.data, (char*) p2->value.data, len);
+    } else {
+        return strncmp((char*) p1->key.data, (char*) p2->key.data, len);
+    }
 }
 
 static unsigned char* construct_query_str(unsigned char*  dst_cstr,
